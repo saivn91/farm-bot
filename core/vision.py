@@ -208,75 +208,76 @@ def build_farm_sweep(
     pt_spacing: int = 25,
 ) -> list[tuple[int, int]]:
     """
-    Tao lo trinh quet trong HINH CHU NHAT XOAY (rotated rectangle)
-    theo goc isometric cua farm.
-    1. Tinh goc xoay tu canh tren-phai cua hinh thoi (top -> right)
-    2. Xoay tat ca cell ve he truc thang -> tinh bbox axis-aligned
-    3. Tao cac duong quet song song (cung do dai) trong bbox xoay
-    4. Chuyen nguoc cac diem ve toa do man hinh
+    Tao lo trinh quet theo truc Isometric cua farm.
+    Chuyen doi toa do man hinh sang khong gian phẳng, chia dong deu tắp 
+    sau do chuyen nguoc lai de dam bao luon song song voi cac o dat.
     """
-    import math
-
     if not cells:
         return []
 
+    # 1. Tìm tâm của toàn bộ vùng nhận diện
     xs = [c.x for c in cells]
     ys = [c.y for c in cells]
-    lx, rx = min(xs), max(xs)
-    ty, by = min(ys), max(ys)
-    cx_d = (lx + rx) / 2.0
-    cy_d = (ty + by) / 2.0
+    cx = sum(xs) / len(xs)
+    cy = sum(ys) / len(ys)
 
-    # Goc xoay = huong canh top->right cua diamond
-    angle = math.atan2(cy_d - ty, rx - cx_d)
-    cos_n = math.cos(-angle)
-    sin_n = math.sin(-angle)
-    cos_p = math.cos(angle)
-    sin_p = math.sin(angle)
+    # 2. Chuyển đổi tọa độ màn hình sang tọa độ Isometric
+    iso_pts = []
+    for c in cells:
+        px = c.x - cx
+        py = c.y - cy
+        iso_x = px / 2.0 + py
+        iso_y = -px / 2.0 + py
+        iso_pts.append((iso_x, iso_y))
 
-    def to_rot(x: float, y: float):
-        px, py = x - cx_d, y - cy_d
-        return (px * cos_n - py * sin_n,
-                px * sin_n + py * cos_n)
+    # 3. Lấy bounding box trong không gian Isometric (tạo thành hình chữ nhật bao quanh farm)
+    min_ix = min(p[0] for p in iso_pts)
+    max_ix = max(p[0] for p in iso_pts)
+    min_iy = min(p[1] for p in iso_pts)
+    max_iy = max(p[1] for p in iso_pts)
 
-    def to_scr(rx: float, ry: float):
-        return (int(rx * cos_p - ry * sin_p + cx_d),
-                int(rx * sin_p + ry * cos_p + cy_d))
+    # 4. Gom nhóm tính toán số lượng hàng thực tế
+    sorted_ix = sorted([p[0] for p in iso_pts])
+    row_centers = [sorted_ix[0]]
+    for ix in sorted_ix[1:]:
+        if ix - row_centers[-1] > 30: # 30 là ngưỡng tách hàng an toàn
+            row_centers.append(ix)
 
-    rot_pts = [to_rot(c.x, c.y) for c in cells]
-    r_xs = [p[0] for p in rot_pts]
-    r_ys = [p[1] for p in rot_pts]
-    r_left, r_right = min(r_xs), max(r_xs)
-    r_top, r_bottom = min(r_ys), max(r_ys)
+    num_rows = max(3, len(row_centers))
 
-    # So hang tu cells detect duoc (trong khong gian xoay)
-    sorted_ry = sorted(rot_pts, key=lambda p: p[1])
-    det_rows: list[list] = [[sorted_ry[0]]]
-    for pt in sorted_ry[1:]:
-        if abs(pt[1] - det_rows[-1][0][1]) <= row_tol:
-            det_rows[-1].append(pt)
-        else:
-            det_rows.append([pt])
-
-    num_rows = max(len(det_rows) + 1, 5)
-
-    # Tao cac duong quet song song CUNG DO DAI trong rotated bbox
     path: list[tuple[int, int]] = []
-    width = r_right - r_left
-    n_cols = max(2, int(width / pt_spacing) + 1)
+
+    # Thu gọn 2 đầu một chút (padding) để không click ra ngoài phạm vi đất
+    pad_y = 15
+    start_iy = min_iy + pad_y
+    end_iy = max_iy - pad_y
 
     for i in range(num_rows):
+        # Tọa độ X (iso_x) của hàng hiện tại
         t = i / max(num_rows - 1, 1)
-        ry = r_top + t * (r_bottom - r_top)
+        ix = min_ix + t * (max_ix - min_ix)
 
-        if i % 2 == 0:                                # L -> R
-            for j in range(n_cols):
-                f = j / max(n_cols - 1, 1)
-                path.append(to_scr(r_left + f * width, ry))
-        else:                                          # R -> L
-            for j in range(n_cols):
-                f = j / max(n_cols - 1, 1)
-                path.append(to_scr(r_right - f * width, ry))
+        # Hàm nội suy tọa độ màn hình từ Isometric
+        def to_scr(ix_val, iy_val):
+            px = ix_val - iy_val
+            py = (ix_val + iy_val) / 2.0
+            return (int(cx + px), int(cy + py))
+
+        # Sinh các điểm liền kề dọc theo hàng để ADB vuốt mượt mà
+        row_pts = []
+        width_iso = max(10, end_iy - start_iy)
+        n_cols = max(2, int(width_iso / pt_spacing) + 1)
+
+        for j in range(n_cols):
+            f = j / max(n_cols - 1, 1)
+            iy = start_iy + f * (end_iy - start_iy)
+            row_pts.append(to_scr(ix, iy))
+
+        # Nối zigzag: Hàng chẵn quét thuận, hàng lẻ quét ngược
+        if i % 2 == 0:
+            path.extend(row_pts)
+        else:
+            path.extend(reversed(row_pts))
 
     return path
 
