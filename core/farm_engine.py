@@ -180,24 +180,110 @@ class FarmEngine:
         path: list[tuple[int, int]] = []
         delays: list[float] = []
 
+        # Phase A
         for pt in seg_fast:
             path.append(pt)
             delays.append(0.010)
 
+        # Phase B
         path.append(anchor)
         delays.append(0.300)
 
+        # Phase C
         for pt in sweep:
             path.append(pt)
-            delays.append(0.060)
+            delays.append(0.001)
 
         return path, delays
+
+    def _align_camera(self) -> bool:
+        """
+        Khac phuc loi lech camera: Tap vao anchor de game cuon camera,
+        dong menu, kiem tra va dong popup (neu co), sau do quet lai toa do luoi.
+        """
+        r = self.inst.farm_region
+        if not r:
+            return False
+            
+        self._log("Can giua camera de lay toa do chuan...")
+        
+        # 1. Tap vao anchor de game tu dong cuon camera
+        self._tap(r.anchor[0], r.anchor[1])
+        self._sleep(1500)
+        
+        if self._stop.is_set():
+            return False
+            
+        # 2. Tap ra vung an toan (goc trai) de dong menu hat giong/liem
+        self._tap(15, 100) 
+        self._sleep(1000)
+        
+        # 3. Kiem tra xem co vo tinh mo popup nao khong
+        screen_check = self._shot()
+        if screen_check is not None:
+            # Tim nut X de dong popup
+            x_btn = find_one(screen_check, "dong_x.png", th=self.inst.thresholds)
+            if x_btn.found:
+                self._log("Phat hien popup la, dang dong...")
+                self._tap(x_btn.x, x_btn.y)
+                self._sleep(800)  # Doi popup dong lai han
+        
+        # 4. Chup lai man hinh o vi tri chuan (khong bi che) va quet dat
+        screen = self._shot()
+        if screen is None:
+            return False
+            
+        cells = find_soil_cells(screen, th=self.inst.thresholds)
+        if not cells:
+            self._log("Khong thay dat sau khi can giua!")
+            self.inst.farm_region = None
+            return False
+            
+        # Cap nhat lai farm_region voi toa do moi toanh
+        self._update_region(cells, screen)
+        return True
+    
+    def _recenter_after_action(self):
+        """
+        Dung toan hoc de keo man hinh tra lai vi tri cu sau khi game auto-pan.
+        Vuot tu giua man hinh di mot doan dung bang khoang cach (Last_Cell - Anchor).
+        """
+        r = self.inst.farm_region
+        if not r or not r.sweep_path:
+            return
+            
+        # Tính toán vector lệch
+        last_x, last_y = r.sweep_path[-1]
+        dx = last_x - r.anchor[0]
+        dy = last_y - r.anchor[1]
+        
+        # Nếu khoảng cách quá nhỏ (dưới 10 pixel), không cần vuốt tránh click nhầm
+        if abs(dx) < 10 and abs(dy) < 10:
+            return
+            
+        sw, sh = self.adb._screen_size()
+        cx, cy = sw // 2, sh // 2
+        
+        self._log(f"Bu tru lech camera: Vuot man hinh keo lai ({dx}, {dy})")
+        # Ra lệnh ADB vuốt màn hình để kéo terrain về chỗ cũ
+        self.adb.run([
+            "shell", "input", "swipe", 
+            str(cx), str(cy), 
+            str(int(cx + dx)), str(int(cy + dy)), 
+            "500"
+        ])
+        self._sleep(1000) # Đợi màn hình trôi xong
 
     # ── Harvest cycle ─────────────────────────────────────────────────────────
 
     def _harvest_cycle(self) -> None:
         self.inst.status = BotStatus.HARVESTING
         self._log("Bat dau gat lua...")
+
+        # Căn giữa camera trước ---
+        if not self._align_camera():
+            return
+        
         r = self.inst.farm_region
 
         self._tap(r.anchor[0], r.anchor[1])
@@ -262,6 +348,9 @@ class FarmEngine:
                 self._tap(kho.x, kho.y)
                 self._sleep(500)
 
+        # ---> GỌI HÀM BÙ TRỪ SAU KHI ĐÃ ĐÓNG POPUP <---
+        self._recenter_after_action()
+
         self.inst.stats.total_harvest += r.cell_count
         self.inst.stats.total_cycles  += 1
         self._log("Gat xong. Chuyen sang gieo hat...")
@@ -271,6 +360,11 @@ class FarmEngine:
 
     def _plant_cycle(self) -> None:
         self.inst.status = BotStatus.PLANTING
+
+        # --- Căn giữa camera trước ---
+        if not self._align_camera():
+            return
+        
         r = self.inst.farm_region
 
         self._tap(r.anchor[0], r.anchor[1])
@@ -324,6 +418,10 @@ class FarmEngine:
             delays   = delays,
         )
         self._sleep(2000)
+
+        # ---> GỌI HÀM BÙ TRỪ de keo lai toa do cu <---
+        self._recenter_after_action()
+
         self.inst.last_plant_time = time.time()
         self._log("Gieo hat xong.")
 
