@@ -126,17 +126,12 @@ class InstanceCard(ctk.CTkFrame):
         row4 = ctk.CTkFrame(self, fg_color="transparent")
         row4.grid(row=4, column=0, sticky="ew", padx=12, pady=(4, 10))
 
-        ctk.CTkButton(
-            row4, text="Start", width=76,
+        self._toggle_btn = ctk.CTkButton(
+            row4, text="Start", width=96,
             fg_color="#1e6e3a", hover_color="#155228",
-            command=lambda: self.on_start(self.inst.id),
-        ).pack(side="left", padx=(0, 5))
-
-        ctk.CTkButton(
-            row4, text="Stop", width=76,
-            fg_color="#7a2c10", hover_color="#5c2008",
-            command=lambda: self.on_stop(self.inst.id),
-        ).pack(side="left", padx=(0, 5))
+            command=self._on_toggle,
+        )
+        self._toggle_btn.pack(side="left", padx=(0, 5))
 
         ctk.CTkButton(
             row4, text="Quet Farm", width=96,
@@ -157,6 +152,12 @@ class InstanceCard(ctk.CTkFrame):
                 self.inst.crop_mode = ctype
                 break
 
+    def _on_toggle(self):
+        if self.inst.is_running:
+            self.on_stop(self.inst.id)
+        else:
+            self.on_start(self.inst.id)
+
     def _on_debug_toggle(self):
         self.inst.debug_mode = self._debug_var.get()
 
@@ -168,6 +169,14 @@ class InstanceCard(ctk.CTkFrame):
         # Status badge
         color = _STATUS_COLOR.get(inst.status, "#444444")
         self._status_lbl.configure(text=inst.status, fg_color=color)
+
+        # Toggle button
+        if inst.is_running:
+            self._toggle_btn.configure(
+                text="Stop", fg_color="#7a2c10", hover_color="#5c2008")
+        else:
+            self._toggle_btn.configure(
+                text="Start", fg_color="#1e6e3a", hover_color="#155228")
 
         # Countdown
         sec = inst.seconds_until_ready()

@@ -74,9 +74,10 @@ class MatchResult:
 class FarmRegion:
     """Vung farm duoc dinh vi theo camera hien tai."""
     polygon:    list              # 4 dinh hinh thoi bao quanh vung farm [(x,y), ...]
-    sweep_path: list              # row waypoints: [dau_hang1, cuoi_hang1, dau_hang2, ...]
+    sweep_path: list              # tat ca o dat theo thu tu quet hang song song
     anchor:     tuple             # o dat giua farm - dung de tap mo menu phu
     cell_count: int               # so o dat detect duoc
+    bbox:       tuple = (0, 0, 0, 0)   # (left, top, right, bottom) bounding box
     last_scan:  float = field(default_factory=time.time)
 
 

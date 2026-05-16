@@ -8,7 +8,6 @@ import random
 import logging
 from typing import Optional, Callable
 
-import cv2
 import numpy as np
 
 from core.models import BotInstance, BotStatus, FarmRegion
@@ -18,9 +17,9 @@ from core.vision import (
     find_all,
     find_soil_cells,
     find_grown_crops,
-    build_sweep_path,
-    build_row_waypoints,
+    build_farm_sweep,
     compute_polygon,
+    compute_bbox,
     draw_debug,
     save_debug,
 )
@@ -135,9 +134,9 @@ class FarmEngine:
 
     def _update_region(self, cells: list, screen: Optional[np.ndarray] = None) -> None:
         """Cap nhat FarmRegion tu danh sach o dat moi detect duoc."""
-        sweep = build_sweep_path(cells)
-        wpts  = build_row_waypoints(sweep)
+        sweep = build_farm_sweep(cells)
         poly  = compute_polygon(cells)
+        bbox  = compute_bbox(cells)
 
         cx = sum(c.x for c in cells) / len(cells)
         cy = sum(c.y for c in cells) / len(cells)
@@ -145,9 +144,10 @@ class FarmEngine:
 
         self.inst.farm_region = FarmRegion(
             polygon    = poly,
-            sweep_path = wpts,
+            sweep_path = sweep,
             anchor     = (anchor_cell.x, anchor_cell.y),
             cell_count = len(cells),
+            bbox       = bbox,
             last_scan  = time.time(),
         )
 
@@ -157,8 +157,41 @@ class FarmEngine:
                 polygon=poly,
                 cells=cells,
                 anchor=(anchor_cell.x, anchor_cell.y),
-                path=wpts if wpts else None,
+                path=sweep if sweep else None,
             )
+
+    # ── Build gesture path ────────────────────────────────────────────────────
+
+    def _build_tool_path(
+        self,
+        tool_pt: tuple[int, int],
+        anchor:  tuple[int, int],
+        sweep:   list[tuple[int, int]],
+    ) -> tuple[list[tuple[int, int]], list[float]]:
+        """
+        Xay lo trinh 3 pha cho gesture keo tool (hat giong / luoi liem):
+          Phase A: keo NHANH tu tool -> anchor  (3 buoc, 10ms/buoc)
+          Phase B: DUNG tai anchor               (1 diem, 300ms)
+          Phase C: quet hinh chu nhat vung farm   (moi diem 60ms)
+        Tra ve (path_pts, delays).
+        """
+        seg_fast = self._interp(tool_pt, anchor, steps=3)
+
+        path: list[tuple[int, int]] = []
+        delays: list[float] = []
+
+        for pt in seg_fast:
+            path.append(pt)
+            delays.append(0.010)
+
+        path.append(anchor)
+        delays.append(0.300)
+
+        for pt in sweep:
+            path.append(pt)
+            delays.append(0.060)
+
+        return path, delays
 
     # ── Harvest cycle ─────────────────────────────────────────────────────────
 
@@ -167,13 +200,11 @@ class FarmEngine:
         self._log("Bat dau gat lua...")
         r = self.inst.farm_region
 
-        # Buoc 1: tap vao o dat giua de mo menu phu
         self._tap(r.anchor[0], r.anchor[1])
         self._sleep(1500)
         if self._stop.is_set():
             return
 
-        # Buoc 2: tim icon luoi liem trong menu phu
         screen = self._shot()
         if screen is None:
             self._log("Khong chup duoc man hinh!")
@@ -196,13 +227,9 @@ class FarmEngine:
             anchor=r.anchor,
         )
 
-        # Buoc 3: xay lo trinh keo
-        #   liem -> anchor  : keo ve o vua tap (tat menu + gat o do)
-        #   anchor -> farm  : keo qua toan bo vung farm
-        row_wpts  = self._jiggle(r.sweep_path, amp=8)
-        seg1      = self._interp((liem.x, liem.y), r.anchor, steps=12)
-        seg2      = self._interp(r.anchor, row_wpts[0], steps=6)
-        full_path = seg1 + seg2 + row_wpts
+        full_path, delays = self._build_tool_path(
+            (liem.x, liem.y), r.anchor, r.sweep_path,
+        )
 
         self._debug_save(
             screen, "harvest_lo_trinh",
@@ -213,22 +240,19 @@ class FarmEngine:
         )
         self._log(
             f"Lo trinh gat: {len(full_path)} diem | "
-            f"bat dau ({liem.x},{liem.y}) -> anchor ({r.anchor[0]},{r.anchor[1]}) "
-            f"-> {len(row_wpts)} waypoints"
+            f"({liem.x},{liem.y}) -> anchor -> {r.cell_count} o dat"
         )
 
-        # Buoc 4: nhan giu liem + keo 1 mach khong nhac tay
         self.adb.hold_and_drag_path(
             hold_pt  = (liem.x, liem.y),
             path_pts = full_path,
-            hold_ms  = 1000,
-            step_ms  = 160,
+            hold_ms  = 400,
+            delays   = delays,
         )
         self._sleep(2500)
         if self._stop.is_set():
             return
 
-        # Xu ly popup kho day
         sc2 = self._shot()
         if sc2 is not None:
             kho = find_one(sc2, "kho_day.png", th=self.inst.thresholds)
@@ -249,14 +273,12 @@ class FarmEngine:
         self.inst.status = BotStatus.PLANTING
         r = self.inst.farm_region
 
-        # Buoc 1: tap vao o dat giua de mo menu phu
         self._tap(r.anchor[0], r.anchor[1])
         self._sleep(1500)
         if self._stop.is_set():
             return
 
-        # Buoc 2: tim icon hat giong trong menu phu
-        screen    = self._shot()
+        screen = self._shot()
         if screen is None:
             self._log("Khong chup duoc man hinh!")
             return
@@ -279,11 +301,9 @@ class FarmEngine:
             anchor=r.anchor,
         )
 
-        # Buoc 3: xay lo trinh keo
-        row_wpts  = self._jiggle(r.sweep_path, amp=8)
-        seg1      = self._interp((seed.x, seed.y), r.anchor, steps=12)
-        seg2      = self._interp(r.anchor, row_wpts[0], steps=6)
-        full_path = seg1 + seg2 + row_wpts
+        full_path, delays = self._build_tool_path(
+            (seed.x, seed.y), r.anchor, r.sweep_path,
+        )
 
         self._debug_save(
             screen, "plant_lo_trinh",
@@ -294,16 +314,14 @@ class FarmEngine:
         )
         self._log(
             f"Lo trinh gieo: {len(full_path)} diem | "
-            f"bat dau ({seed.x},{seed.y}) -> anchor ({r.anchor[0]},{r.anchor[1]}) "
-            f"-> {len(row_wpts)} waypoints"
+            f"({seed.x},{seed.y}) -> anchor -> {r.cell_count} o dat"
         )
 
-        # Buoc 4: nhan giu hat giong + keo 1 mach khong nhac tay
         self.adb.hold_and_drag_path(
             hold_pt  = (seed.x, seed.y),
             path_pts = full_path,
-            hold_ms  = 1000,
-            step_ms  = 160,
+            hold_ms  = 400,
+            delays   = delays,
         )
         self._sleep(2000)
         self.inst.last_plant_time = time.time()
@@ -375,6 +393,17 @@ class FarmEngine:
         self.inst.adb_serial = self.adb.serial
         self._log(f"ADB: {msg}")
 
+        # Detect va cache thong tin cam ung / man hinh truoc khi vao vong lap chinh
+        try:
+            sw, sh = self.adb._screen_size()
+            dev, mx, my = self.adb._detect_touch_device()
+            self._log(
+                f"Man hinh: {sw}x{sh} | "
+                f"Touch device: {dev} (max_x={mx}, max_y={my})"
+            )
+        except Exception as e:
+            self._log(f"[WARN] Khong detect duoc touch device: {e}")
+
         while not self._stop.is_set():
             try:
                 screen = self._shot()
@@ -398,21 +427,21 @@ class FarmEngine:
                     self._sleep(5000)
                     continue
 
-                r        = self.inst.farm_region
-                poly_arr = np.array(r.polygon, np.int32)
-                grown    = find_grown_crops(
+                r    = self.inst.farm_region
+                bbox = r.bbox  # (left, top, right, bottom)
+
+                grown = find_grown_crops(
                     screen,
                     self.inst.crop_mode.grown_template(),
                     th=self.inst.thresholds,
                 )
 
-                def in_poly(c) -> bool:
-                    return cv2.pointPolygonTest(
-                        poly_arr, (float(c.x), float(c.y)), False
-                    ) >= 0
+                def in_bbox(c) -> bool:
+                    return (bbox[0] <= c.x <= bbox[2]
+                            and bbox[1] <= c.y <= bbox[3])
 
-                valid_grown = [c for c in grown if in_poly(c)]
-                valid_empty = [c for c in (cells or []) if in_poly(c)]
+                valid_grown = [c for c in grown if in_bbox(c)]
+                valid_empty = [c for c in (cells or []) if in_bbox(c)]
 
                 total = r.cell_count or 1
                 self.inst.pct_grown = len(valid_grown) / total * 100

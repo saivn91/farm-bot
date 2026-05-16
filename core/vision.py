@@ -202,7 +202,82 @@ def build_row_waypoints(
     return waypoints
 
 
-# ── Polygon ───────────────────────────────────────────────────────────────────
+def build_farm_sweep(
+    cells: list[MatchResult],
+    row_tol: int = 25,
+    pt_spacing: int = 25,
+) -> list[tuple[int, int]]:
+    """
+    Tao lo trinh quet CHEO theo hinh thoi (diamond) cua vung farm.
+    Dung 4 diem cuc (tren, phai, duoi, trai) lam dinh hinh thoi.
+    Cac duong quet song song voi canh tren-phai, buoc tien tu
+    dinh-tren xuong dinh-duoi.
+    """
+    if not cells:
+        return []
+
+    xs = [c.x for c in cells]
+    ys = [c.y for c in cells]
+    lx, rx = min(xs), max(xs)
+    ty, by = min(ys), max(ys)
+    cx = (lx + rx) // 2
+    cy = (ty + by) // 2
+
+    top    = (cx, ty)
+    right  = (rx, cy)
+    bottom = (cx, by)
+    left   = (lx, cy)
+
+    # -- Tinh so hang tu cells detect duoc --
+    pts = sorted([(c.x, c.y) for c in cells], key=lambda p: p[1])
+    det_rows: list[list[tuple[int, int]]] = []
+    row: list[tuple[int, int]] = [pts[0]]
+    for pt in pts[1:]:
+        if abs(pt[1] - row[0][1]) <= row_tol:
+            row.append(pt)
+        else:
+            det_rows.append(row)
+            row = [pt]
+    det_rows.append(row)
+
+    num_rows = max(len(det_rows) + 1, 5)
+
+    # -- Tao cac duong quet cheo trong hinh thoi --
+    path: list[tuple[int, int]] = []
+    for i in range(num_rows):
+        t = i / max(num_rows - 1, 1)
+
+        if t <= 0.5:
+            s = t * 2.0
+            lp = (int(top[0] + s * (left[0]  - top[0])),
+                  int(top[1] + s * (left[1]  - top[1])))
+            rp = (int(top[0] + s * (right[0] - top[0])),
+                  int(top[1] + s * (right[1] - top[1])))
+        else:
+            s = (t - 0.5) * 2.0
+            lp = (int(left[0]  + s * (bottom[0] - left[0])),
+                  int(left[1]  + s * (bottom[1] - left[1])))
+            rp = (int(right[0] + s * (bottom[0] - right[0])),
+                  int(right[1] + s * (bottom[1] - right[1])))
+
+        dist = max(1, int(((rp[0] - lp[0]) ** 2 + (rp[1] - lp[1]) ** 2) ** 0.5))
+        n_pts = max(2, dist // pt_spacing + 1)
+
+        if i % 2 == 0:
+            for j in range(n_pts):
+                f = j / max(n_pts - 1, 1)
+                path.append((int(lp[0] + f * (rp[0] - lp[0])),
+                             int(lp[1] + f * (rp[1] - lp[1]))))
+        else:
+            for j in range(n_pts):
+                f = j / max(n_pts - 1, 1)
+                path.append((int(rp[0] + f * (lp[0] - rp[0])),
+                             int(rp[1] + f * (lp[1] - rp[1]))))
+
+    return path
+
+
+# ── Polygon / BBox ────────────────────────────────────────────────────────────
 
 def compute_polygon(cells: list[MatchResult], pad: int = 40) -> list[tuple[int, int]]:
     """Tinh polygon hinh thoi bao quanh vung farm."""
@@ -218,6 +293,16 @@ def compute_polygon(cells: list[MatchResult], pad: int = 40) -> list[tuple[int, 
         (cx,       by + pad),
         (lx - pad, cy),
     ]
+
+
+def compute_bbox(
+    cells: list[MatchResult],
+    pad: int = 50,
+) -> tuple[int, int, int, int]:
+    """Tinh bounding box HINH CHU NHAT bao quanh vung farm. (left, top, right, bottom)"""
+    xs = [c.x for c in cells]
+    ys = [c.y for c in cells]
+    return (min(xs) - pad, min(ys) - pad, max(xs) + pad, max(ys) + pad)
 
 
 # ── Debug drawing ─────────────────────────────────────────────────────────────

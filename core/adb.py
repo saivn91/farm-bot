@@ -3,6 +3,7 @@ ADB Controller - xu ly moi tuong tac voi Android Debug Bridge.
 """
 import subprocess
 import os
+import re
 import time
 import logging
 from typing import Optional
@@ -17,8 +18,10 @@ LD_PORTS = [5554, 5556, 5558, 5560, 5562, 5564]
 
 class AdbController:
     def __init__(self, adb_path: str = "adb", serial: str = ""):
-        self.adb_path = adb_path
-        self.serial   = serial
+        self.adb_path  = adb_path
+        self.serial    = serial
+        self._touch_dev: Optional[tuple[str, int, int]] = None  # (device, max_x, max_y)
+        self._screen_wh: Optional[tuple[int, int]]      = None  # (width, height)
 
     # ── Internal ──────────────────────────────────────────────────────────────
 
@@ -185,6 +188,106 @@ class AdbController:
 
     # ── Touch actions ─────────────────────────────────────────────────────────
 
+    def _screen_size(self) -> tuple[int, int]:
+        """Lay kich thuoc man hinh (co cache)."""
+        if self._screen_wh:
+            return self._screen_wh
+        _, out, _ = self.run(["shell", "wm size"])
+        for line in out.splitlines():
+            if "size:" in line.lower():
+                try:
+                    part = line.split(":")[-1].strip()
+                    w, h = part.split("x")
+                    self._screen_wh = (int(w), int(h))
+                    return self._screen_wh
+                except Exception:
+                    pass
+        self._screen_wh = (1280, 720)
+        return self._screen_wh
+
+    def _detect_touch_device(self) -> tuple[str, int, int]:
+        """
+        Tu dong tim thiet bi cam ung (co cache).
+        Tra ve (device_path, max_touch_x, max_touch_y).
+        Ho tro ca output co ten symbolic (-pl) va chi co hex code (-p).
+        """
+        if self._touch_dev:
+            return self._touch_dev
+
+        # Thu -pl truoc (co ten symbolic), fallback -p (chi hex)
+        _, out, _ = self.run(["shell", "getevent -pl"], timeout=10)
+        if not out or "add device" not in out:
+            _, out, _ = self.run(["shell", "getevent -p"], timeout=10)
+
+        logger.info(f"getevent output ({len(out)} chars):\n{out[:1500]}")
+
+        # Regex khop ca "ABS_MT_POSITION_X" lan hex "0035"
+        # 0035 = ABS_MT_POSITION_X, 0036 = ABS_MT_POSITION_Y
+        re_mt_x = re.compile(r'(?:ABS_MT_POSITION_X|\b0035\b)')
+        re_mt_y = re.compile(r'(?:ABS_MT_POSITION_Y|\b0036\b)')
+        re_max  = re.compile(r'max\s+(\d+)')
+
+        candidates: list[tuple[str, int, int]] = []
+        cur_dev:   Optional[str] = None
+        cur_name   = ""
+        cur_has_x  = cur_has_y = False
+        cur_max_x: Optional[int] = None
+        cur_max_y: Optional[int] = None
+
+        for raw in out.splitlines():
+            line = raw.strip()
+
+            if line.startswith("add device"):
+                if cur_has_x and cur_has_y and cur_dev:
+                    candidates.append(
+                        (cur_dev, cur_max_x or 32767, cur_max_y or 32767)
+                    )
+                    logger.info(
+                        f"  touch candidate: {cur_dev} ({cur_name}) "
+                        f"max_x={cur_max_x} max_y={cur_max_y}"
+                    )
+                parts = line.split(": ", 1)
+                cur_dev   = parts[1].strip() if len(parts) > 1 else None
+                cur_name  = ""
+                cur_has_x = cur_has_y = False
+                cur_max_x = cur_max_y = None
+                continue
+
+            if line.startswith("name:"):
+                cur_name = line.split(":", 1)[1].strip().strip('"')
+                continue
+
+            if re_mt_x.search(line):
+                cur_has_x = True
+                m = re_max.search(line)
+                if m:
+                    cur_max_x = int(m.group(1))
+
+            if re_mt_y.search(line):
+                cur_has_y = True
+                m = re_max.search(line)
+                if m:
+                    cur_max_y = int(m.group(1))
+
+        # device cuoi cung
+        if cur_has_x and cur_has_y and cur_dev:
+            candidates.append(
+                (cur_dev, cur_max_x or 32767, cur_max_y or 32767)
+            )
+            logger.info(
+                f"  touch candidate: {cur_dev} ({cur_name}) "
+                f"max_x={cur_max_x} max_y={cur_max_y}"
+            )
+
+        if candidates:
+            self._touch_dev = candidates[0]
+        else:
+            logger.warning("Khong tim thay touch device! Dung fallback /dev/input/event1")
+            self._touch_dev = ("/dev/input/event1", 32767, 32767)
+
+        logger.info(f"Selected touch device: {self._touch_dev}")
+        return self._touch_dev
+
     def tap(self, x: int, y: int, delay_ms: int = 150):
         """Nhan thuong tai (x, y)."""
         self.run(["shell", "input", "tap", str(x), str(y)])
@@ -199,7 +302,163 @@ class AdbController:
         self.run(["shell", "input", "swipe",
                   str(x), str(y), str(x), str(y), str(ms)])
 
+    def _sendevent_test(self, dev: str) -> bool:
+        """Kiem tra nhanh xem sendevent co ghi duoc vao device hay khong."""
+        code, out, err = self.run(
+            ["shell", f"sendevent {dev} 0 0 0 && echo __OK__"],
+            timeout=5,
+        )
+        ok = "__OK__" in out
+        if not ok:
+            logger.warning(
+                f"sendevent test FAIL cho {dev}: "
+                f"rc={code} out={out[:100]!r} err={err[:100]!r}"
+            )
+        return ok
+
+    def _do_sendevent_gesture(
+        self,
+        hold_pt:  tuple[int, int],
+        path_pts: list[tuple[int, int]],
+        hold_ms:  int = 800,
+        step_ms:  int = 80,
+        delays:   Optional[list[float]] = None,
+    ) -> bool:
+        """
+        Gesture nhan giu + keo 1 mach LIEN TUC bang sendevent.
+        Tra ve True neu chay thanh cong, False neu loi.
+
+        delays: danh sach delay (giay) cho tung diem trong path_pts.
+                Neu None, dung step_ms cho tat ca.
+        """
+        try:
+            dev, max_tx, max_ty = self._detect_touch_device()
+            sw, sh = self._screen_size()
+
+            if not self._sendevent_test(dev):
+                return False
+
+            sx = max_tx / max(sw - 1, 1)
+            sy = max_ty / max(sh - 1, 1)
+
+            def cvt_x(x: int) -> int:
+                return max(0, min(max_tx, round(x * sx)))
+
+            def cvt_y(y: int) -> int:
+                return max(0, min(max_ty, round(y * sy)))
+
+            hx, hy = hold_pt
+            hold_s = f"{hold_ms / 1000:.3f}"
+            default_s = step_ms / 1000.0
+
+            se = f"sendevent {dev}"
+
+            lines: list[str] = [
+                "echo __GESTURE_START__",
+                f"{se} 3 47 0",            # ABS_MT_SLOT = 0
+                f"{se} 3 57 0",            # ABS_MT_TRACKING_ID = 0
+                f"{se} 3 48 5",            # ABS_MT_TOUCH_MAJOR = 5
+                f"{se} 3 58 50",           # ABS_MT_PRESSURE = 50
+                f"{se} 3 53 {cvt_x(hx)}", # ABS_MT_POSITION_X
+                f"{se} 3 54 {cvt_y(hy)}", # ABS_MT_POSITION_Y
+                f"{se} 1 330 1",           # BTN_TOUCH = 1 (down)
+                f"{se} 0 0 0",             # SYN_REPORT
+                f"sleep {hold_s}",
+            ]
+
+            total_delay = hold_ms / 1000.0
+            for i, (x, y) in enumerate(path_pts):
+                d = delays[i] if delays else default_s
+                lines += [
+                    f"{se} 3 53 {cvt_x(x)}",
+                    f"{se} 3 54 {cvt_y(y)}",
+                    f"{se} 0 0 0",         # SYN_REPORT
+                ]
+                if d > 0:
+                    lines.append(f"sleep {d:.3f}")
+                    total_delay += d
+
+            lines += [
+                f"{se} 3 57 -1",           # ABS_MT_TRACKING_ID = -1 (finger up)
+                f"{se} 1 330 0",           # BTN_TOUCH = 0 (up)
+                f"{se} 0 0 0",             # SYN_REPORT
+                "echo __GESTURE_DONE__",
+            ]
+
+            script      = "\n".join(lines) + "\n"
+            est_timeout = round(total_delay) + 25
+
+            logger.info(
+                f"sendevent gesture: dev={dev} hold=({hx},{hy})->"
+                f"({cvt_x(hx)},{cvt_y(hy)}) points={len(path_pts)} "
+                f"hold_ms={hold_ms} total_delay={total_delay:.1f}s"
+            )
+
+            proc = subprocess.Popen(
+                self._base() + ["shell", "sh"],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                creationflags=self._no_win(),
+            )
+            stdout, stderr = proc.communicate(
+                input=script.encode(), timeout=est_timeout,
+            )
+
+            out_text = stdout.decode(errors="replace").strip()
+            err_text = stderr.decode(errors="replace").strip()
+
+            if err_text:
+                logger.warning(f"sendevent stderr: {err_text[:500]}")
+            if "__GESTURE_DONE__" not in out_text:
+                logger.warning(
+                    f"sendevent script khong hoan thanh! "
+                    f"rc={proc.returncode} out={out_text[:300]!r}"
+                )
+                return False
+
+            logger.info("sendevent gesture OK")
+            return True
+
+        except subprocess.TimeoutExpired:
+            try:
+                proc.kill()  # type: ignore[possibly-undefined]
+            except Exception:
+                pass
+            logger.warning("sendevent gesture timeout")
+            return False
+        except Exception as e:
+            logger.error(f"sendevent gesture loi: {e}")
+            return False
+
     def hold_and_drag_path(
+        self,
+        hold_pt:  tuple[int, int],
+        path_pts: list[tuple[int, int]],
+        hold_ms:  int = 900,
+        step_ms:  int = 150,
+        delays:   Optional[list[float]] = None,
+        max_len:  int = 6000,
+    ) -> None:
+        """
+        Nhan giu tai hold_pt roi keo lien tuc qua path_pts.
+        delays: danh sach delay (giay) cho tung diem. Neu None, dung step_ms.
+        Method 1: sendevent (gesture lien tuc)
+        Method 2: input swipe chain (fallback)
+        """
+        if not path_pts:
+            self.long_press(hold_pt[0], hold_pt[1], hold_ms)
+            return
+
+        if self._do_sendevent_gesture(
+            hold_pt, path_pts, hold_ms, step_ms, delays=delays
+        ):
+            return
+
+        logger.info("sendevent FAIL -> fallback input swipe chain")
+        self._hold_and_drag_legacy(hold_pt, path_pts, hold_ms, step_ms, max_len)
+
+    def _hold_and_drag_legacy(
         self,
         hold_pt:  tuple[int, int],
         path_pts: list[tuple[int, int]],
@@ -208,32 +467,25 @@ class AdbController:
         max_len:  int = 6000,
     ) -> None:
         """
-        Nhan giu tai hold_pt roi keo lien tuc qua path_pts ma khong nhac tay len.
-
-        Thuc hien bang cach gom long press + toan bo drag thanh cac batch lenh
-        adb shell duoc noi voi '&&'. Moi batch la 1 ket noi ADB duy nhat ->
-        khong co khoang ho giua cac gesture.
-        Long press luon nam trong batch dau tien.
+        Fallback: gom cac lenh 'input swipe' bang &&.
+        Moi 'input swipe' la 1 gesture doc lap (co nhac tay o cuoi).
         """
         if not path_pts:
             self.long_press(hold_pt[0], hold_pt[1], hold_ms)
             return
 
         hx, hy = hold_pt
-
-        # Xay danh sach tat ca lenh: long press truoc, sau do tung doan drag
         all_cmds: list[str] = [f"input swipe {hx} {hy} {hx} {hy} {hold_ms}"]
         px, py = hx, hy
         for x, y in path_pts:
             all_cmds.append(f"input swipe {px} {py} {x} {y} {step_ms}")
             px, py = x, y
 
-        # Gom thanh batch sao cho do dai moi batch <= max_len ky tu
         batches: list[list[str]] = []
         cur:     list[str] = []
         cur_len: int = 0
         for cmd in all_cmds:
-            clen = len(cmd) + 4  # " && "
+            clen = len(cmd) + 4
             if cur_len + clen > max_len and cur:
                 batches.append(cur)
                 cur, cur_len = [], 0
