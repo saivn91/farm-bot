@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environment
+venv/
+.venv/
+env/
+.env/
+
+# IDE
+.vscode/
+.idea/
+*.suo
+*.user
+
+# PyInstaller output
+*.spec
+*.exe
+*.app
+
+# Debug / test images
+debug_images/
+test-vision/result_*.png
+test-vision/screen.png
+
+# Config (luu tren may nguoi dung, khong commit)
+# Config duoc luu tai %APPDATA%/FarmBot/config.json
+
+# Templates (anh chup tu game, khong commit)
+templates/*.png
+templates/*.jpg
+!templates/README.md
+
+# Logs
+*.log
+
+# OS
+Thumbs.db
+.DS_Store
+desktop.ini
