@@ -208,11 +208,15 @@ def build_farm_sweep(
     pt_spacing: int = 25,
 ) -> list[tuple[int, int]]:
     """
-    Tao lo trinh quet CHEO theo hinh thoi (diamond) cua vung farm.
-    Dung 4 diem cuc (tren, phai, duoi, trai) lam dinh hinh thoi.
-    Cac duong quet song song voi canh tren-phai, buoc tien tu
-    dinh-tren xuong dinh-duoi.
+    Tao lo trinh quet trong HINH CHU NHAT XOAY (rotated rectangle)
+    theo goc isometric cua farm.
+    1. Tinh goc xoay tu canh tren-phai cua hinh thoi (top -> right)
+    2. Xoay tat ca cell ve he truc thang -> tinh bbox axis-aligned
+    3. Tao cac duong quet song song (cung do dai) trong bbox xoay
+    4. Chuyen nguoc cac diem ve toa do man hinh
     """
+    import math
+
     if not cells:
         return []
 
@@ -220,59 +224,59 @@ def build_farm_sweep(
     ys = [c.y for c in cells]
     lx, rx = min(xs), max(xs)
     ty, by = min(ys), max(ys)
-    cx = (lx + rx) // 2
-    cy = (ty + by) // 2
+    cx_d = (lx + rx) / 2.0
+    cy_d = (ty + by) / 2.0
 
-    top    = (cx, ty)
-    right  = (rx, cy)
-    bottom = (cx, by)
-    left   = (lx, cy)
+    # Goc xoay = huong canh top->right cua diamond
+    angle = math.atan2(cy_d - ty, rx - cx_d)
+    cos_n = math.cos(-angle)
+    sin_n = math.sin(-angle)
+    cos_p = math.cos(angle)
+    sin_p = math.sin(angle)
 
-    # -- Tinh so hang tu cells detect duoc --
-    pts = sorted([(c.x, c.y) for c in cells], key=lambda p: p[1])
-    det_rows: list[list[tuple[int, int]]] = []
-    row: list[tuple[int, int]] = [pts[0]]
-    for pt in pts[1:]:
-        if abs(pt[1] - row[0][1]) <= row_tol:
-            row.append(pt)
+    def to_rot(x: float, y: float):
+        px, py = x - cx_d, y - cy_d
+        return (px * cos_n - py * sin_n,
+                px * sin_n + py * cos_n)
+
+    def to_scr(rx: float, ry: float):
+        return (int(rx * cos_p - ry * sin_p + cx_d),
+                int(rx * sin_p + ry * cos_p + cy_d))
+
+    rot_pts = [to_rot(c.x, c.y) for c in cells]
+    r_xs = [p[0] for p in rot_pts]
+    r_ys = [p[1] for p in rot_pts]
+    r_left, r_right = min(r_xs), max(r_xs)
+    r_top, r_bottom = min(r_ys), max(r_ys)
+
+    # So hang tu cells detect duoc (trong khong gian xoay)
+    sorted_ry = sorted(rot_pts, key=lambda p: p[1])
+    det_rows: list[list] = [[sorted_ry[0]]]
+    for pt in sorted_ry[1:]:
+        if abs(pt[1] - det_rows[-1][0][1]) <= row_tol:
+            det_rows[-1].append(pt)
         else:
-            det_rows.append(row)
-            row = [pt]
-    det_rows.append(row)
+            det_rows.append([pt])
 
     num_rows = max(len(det_rows) + 1, 5)
 
-    # -- Tao cac duong quet cheo trong hinh thoi --
+    # Tao cac duong quet song song CUNG DO DAI trong rotated bbox
     path: list[tuple[int, int]] = []
+    width = r_right - r_left
+    n_cols = max(2, int(width / pt_spacing) + 1)
+
     for i in range(num_rows):
         t = i / max(num_rows - 1, 1)
+        ry = r_top + t * (r_bottom - r_top)
 
-        if t <= 0.5:
-            s = t * 2.0
-            lp = (int(top[0] + s * (left[0]  - top[0])),
-                  int(top[1] + s * (left[1]  - top[1])))
-            rp = (int(top[0] + s * (right[0] - top[0])),
-                  int(top[1] + s * (right[1] - top[1])))
-        else:
-            s = (t - 0.5) * 2.0
-            lp = (int(left[0]  + s * (bottom[0] - left[0])),
-                  int(left[1]  + s * (bottom[1] - left[1])))
-            rp = (int(right[0] + s * (bottom[0] - right[0])),
-                  int(right[1] + s * (bottom[1] - right[1])))
-
-        dist = max(1, int(((rp[0] - lp[0]) ** 2 + (rp[1] - lp[1]) ** 2) ** 0.5))
-        n_pts = max(2, dist // pt_spacing + 1)
-
-        if i % 2 == 0:
-            for j in range(n_pts):
-                f = j / max(n_pts - 1, 1)
-                path.append((int(lp[0] + f * (rp[0] - lp[0])),
-                             int(lp[1] + f * (rp[1] - lp[1]))))
-        else:
-            for j in range(n_pts):
-                f = j / max(n_pts - 1, 1)
-                path.append((int(rp[0] + f * (lp[0] - rp[0])),
-                             int(rp[1] + f * (lp[1] - rp[1]))))
+        if i % 2 == 0:                                # L -> R
+            for j in range(n_cols):
+                f = j / max(n_cols - 1, 1)
+                path.append(to_scr(r_left + f * width, ry))
+        else:                                          # R -> L
+            for j in range(n_cols):
+                f = j / max(n_cols - 1, 1)
+                path.append(to_scr(r_right - f * width, ry))
 
     return path
 
