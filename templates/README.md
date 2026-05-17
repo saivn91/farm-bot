@@ -12,8 +12,8 @@ Dat file vao thu muc nay (`templates/`) va dat ten dung nhu bang duoi.
 | `dat_ngang.png` | O dat trong - co duong ke ngang | Chup 1 o dat rieng le |
 | `dat_doc.png` | O dat trong - co duong ke doc | Chup 1 o dat rieng le |
 | `liem.png` | Icon luoi liem trong menu phu | Xuat hien khi tap vao o lua chin |
-| `lua.png` | Icon hat lua trong menu phu | Xuat hien khi tap vao o dat trong |
-| `lua_chin.png` | Lua da chin (tren cay) | Template nhan dien lua san sang gat |
+| `lua_hat_giong.png` | Icon hat lua trong menu phu | Xuat hien khi tap vao o dat trong |
+| `lua_thu_hoach.png` | Lua da chin (tren cay) | Template nhan dien lua san sang gat |
 | `kho_day.png` | Popup thong bao kho day | |
 | `dong_x.png` | Nut X dong popup / cua so | Nut X nho goc tren phai |
 | `cho.png` | Icon cua hang / cho | Tren thanh menu chinh |

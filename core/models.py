@@ -1,13 +1,10 @@
 """
-Models: data classes va enums cho Farm Bot.
+Models: data classes và enums cho Farm Bot.
 """
 from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import Optional
 import time
-
-
-# ── Crop types ────────────────────────────────────────────────────────────────
 
 class CropType(IntEnum):
     LUA = 0
@@ -18,47 +15,35 @@ class CropType(IntEnum):
     # MIA       = 4   # ~30 phut
 
     def label(self) -> str:
-        _labels = {
-            CropType.LUA: "Lua (2 phut)",
-        }
+        _labels = {CropType.LUA: "Lúa (2 phút)"}
         return _labels.get(self, self.name)
 
     def grow_seconds(self) -> int:
-        _times = {
-            CropType.LUA: 120,
-        }
+        _times = {CropType.LUA: 120}
         return _times.get(self, 120)
 
     def seed_template(self) -> str:
-        """Ten file template icon hat giong trong menu phu."""
-        _seeds = {
-            CropType.LUA: "lua.png",
-        }
-        return _seeds.get(self, "lua.png")
+        _seeds = {CropType.LUA: "lua_hat_giong.png"}
+        return _seeds.get(self, "lua_hat_giong.png")
 
     def grown_template(self) -> str:
-        """Ten file template cay da chin."""
-        _grown = {
-            CropType.LUA: "lua_chin.png",
-        }
-        return _grown.get(self, "lua_chin.png")
+        _grown = {CropType.LUA: "lua_thu_hoach.png"}
+        return _grown.get(self, "lua_thu_hoach.png")
 
-
-# ── Bot status ────────────────────────────────────────────────────────────────
+    def storage_template(self) -> str:
+        _storage = {CropType.LUA: "lua_kho.png"}
+        return _storage.get(self, "lua_kho.png")
 
 class BotStatus:
-    IDLE       = "IDLE"
-    RUNNING    = "RUNNING"
-    SCANNING   = "SCANNING"
-    HARVESTING = "HARVESTING"
-    PLANTING   = "PLANTING"
-    SELLING    = "SELLING"
-    WAITING    = "WAITING"
-    ERROR      = "ERROR"
-    STOPPED    = "STOPPED"
-
-
-# ── Match result ──────────────────────────────────────────────────────────────
+    IDLE       = "ĐANG NGHỈ"
+    RUNNING    = "ĐANG CHẠY"
+    SCANNING   = "ĐANG QUÉT MÀN HÌNH"
+    HARVESTING = "ĐANG THU HOẠCH"
+    PLANTING   = "ĐANG GIEO HẠT"
+    SELLING    = "ĐANG BÁN HÀNG"
+    WAITING    = "ĐANG CHỜ CÂY CHÍN"
+    ERROR      = "LỖI HỆ THỐNG"
+    STOPPED    = "ĐÃ DỪNG"
 
 @dataclass
 class MatchResult:
@@ -67,49 +52,34 @@ class MatchResult:
     y:     int   = 0
     score: float = 0.0
 
-
-# ── Farm region ───────────────────────────────────────────────────────────────
-
 @dataclass
 class FarmRegion:
-    """Vung farm duoc dinh vi theo camera hien tai."""
-    polygon:    list              # 4 dinh hinh thoi bao quanh vung farm [(x,y), ...]
-    sweep_path: list              # tat ca o dat theo thu tu quet hang song song
-    anchor:     tuple             # o dat giua farm - dung de tap mo menu phu
-    cell_count: int               # so o dat detect duoc
-    bbox:       tuple = (0, 0, 0, 0)   # (left, top, right, bottom) bounding box
+    polygon:    list              
+    sweep_path: list              
+    anchor:     tuple             
+    cell_count: int               
+    bbox:       tuple = (0, 0, 0, 0)   
     last_scan:  float = field(default_factory=time.time)
-
-
-# ── Template thresholds ───────────────────────────────────────────────────────
 
 @dataclass
 class TemplateThresholds:
-    """
-    Nguong nhan dien (0.0 - 1.0) cho tung template.
-    Gia tri nho = de match hon (dung cho anh kho detect nhu lua_chin).
-    Gia tri lon = nghiem ngat hon (it nham hon).
-    """
-    dat_ngang:   float = 0.75
-    dat_doc:     float = 0.75
-    liem:        float = 0.75
-    lua:         float = 0.75
-    lua_chin:    float = 0.55   # lua chin kho detect hon, dung nguong thap hon
-    kho_day:     float = 0.75
-    dong_x:      float = 0.80
-    cho:         float = 0.75
-    thung_hang:  float = 0.75
-    thung_ban:   float = 0.75
-    tao_rao_ban: float = 0.80
+    dat_ngang:     float = 0.75
+    dat_doc:       float = 0.75
+    liem:          float = 0.75
+    lua_hat_giong: float = 0.75
+    lua_thu_hoach: float = 0.55   
+    kho_day:       float = 0.75
+    dong_x:        float = 0.80
+    cho:           float = 0.75
+    thung_hang:    float = 0.75
+    thung_ban:     float = 0.75
+    tao_rao_ban:   float = 0.80
+    lua_kho:       float = 0.75
+    nut_cong:      float = 0.80
 
     def get(self, tmpl_name: str) -> float:
-        """Lay nguong theo ten file template (bo .png).
-        Tra ve 0.75 neu khong co cai dat rieng."""
         key = tmpl_name.replace(".png", "").replace(".jpg", "")
         return getattr(self, key, 0.75)
-
-
-# ── Stats ─────────────────────────────────────────────────────────────────────
 
 @dataclass
 class FarmStats:
@@ -124,22 +94,19 @@ class FarmStats:
         s = int(elapsed % 60)
         return f"{h:02d}:{m:02d}:{s:02d}"
 
-
-# ── Bot instance ──────────────────────────────────────────────────────────────
-
 @dataclass
 class BotInstance:
     id:          int
     emu_index:   int       = 0
+    name:        str       = ""   # Tên hiển thị do người dùng tự đặt
     adb_serial:  str       = ""
     adb_path:    str       = "adb"
     crop_mode:   CropType  = CropType.LUA
     enable_shop: bool      = True
-    debug_mode:  bool      = True   # Luu anh debug khi True
+    debug_mode:  bool      = True
 
     thresholds: TemplateThresholds = field(default_factory=TemplateThresholds)
 
-    # Runtime state (khong luu config)
     farm_region:     Optional[FarmRegion] = None
     status:          str   = BotStatus.IDLE
     is_running:      bool  = False
@@ -149,6 +116,12 @@ class BotInstance:
 
     stats: FarmStats = field(default_factory=FarmStats)
     logs:  list      = field(default_factory=list)
+
+    def get_display_name(self) -> str:
+        """Trả về tên người dùng tự đặt, nếu trống thì dùng tên mặc định LDPlayer."""
+        if self.name.strip():
+            return self.name.strip()
+        return f"LDPlayer-{self.emu_index}" if self.emu_index > 0 else "LDPlayer"
 
     def seconds_until_ready(self) -> int:
         if self.last_plant_time == 0:

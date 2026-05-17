@@ -1,6 +1,5 @@
 """
 Config manager - luu va doc cai dat bot bang JSON.
-File luu tai: %APPDATA%/FarmBot/config.json
 """
 import os
 import json
@@ -21,16 +20,13 @@ DEFAULT_SETTINGS = {
     "theme":         "dark",
 }
 
-
 def _thresholds_to_dict(th: TemplateThresholds) -> dict:
     return asdict(th)
-
 
 def _thresholds_from_dict(d: dict) -> TemplateThresholds:
     defaults = asdict(TemplateThresholds())
     merged   = {k: float(d.get(k, defaults[k])) for k in defaults}
     return TemplateThresholds(**merged)
-
 
 def save(instances: List[BotInstance], settings: dict) -> None:
     os.makedirs(CFG_DIR, exist_ok=True)
@@ -39,6 +35,7 @@ def save(instances: List[BotInstance], settings: dict) -> None:
         "instances": [
             {
                 "id":          inst.id,
+                "name":        inst.name,
                 "emu_index":   inst.emu_index,
                 "adb_serial":  inst.adb_serial,
                 "adb_path":    inst.adb_path,
@@ -57,12 +54,10 @@ def save(instances: List[BotInstance], settings: dict) -> None:
     except Exception as e:
         logger.error(f"Luu config that bai: {e}")
 
-
 def load() -> tuple[List[BotInstance], dict]:
     settings = dict(DEFAULT_SETTINGS)
 
     if not os.path.exists(CFG_FILE):
-        logger.info("Chua co file config, dung mac dinh.")
         return [BotInstance(id=0)], settings
 
     try:
@@ -80,6 +75,7 @@ def load() -> tuple[List[BotInstance], dict]:
             th_dict = d.get("thresholds", {})
             inst = BotInstance(
                 id          = int(d.get("id", 0)),
+                name        = str(d.get("name", "")),
                 emu_index   = int(d.get("emu_index", 0)),
                 adb_serial  = str(d.get("adb_serial", "")),
                 adb_path    = str(d.get("adb_path", settings["adb_path"])),
@@ -95,5 +91,4 @@ def load() -> tuple[List[BotInstance], dict]:
     if not instances:
         instances = [BotInstance(id=0)]
 
-    logger.info(f"Config da doc: {len(instances)} instance(s).")
     return instances, settings
