@@ -68,7 +68,7 @@ class TemplateThresholds:
     liem:          float = 0.75
     lua_hat_giong: float = 0.75
     lua_thu_hoach: float = 0.55   
-    kho_day:       float = 0.75
+    kho_day:       float = 0.65
     
     # --- Su dung 2 nut dong_x va ha nguong xuong 0.6 ---
     dong_x:        float = 0.60
@@ -83,8 +83,8 @@ class TemplateThresholds:
     kho_nong_san_shop: float = 0.75
     lua_kho:           float = 0.75
     mui_ten_phai:      float = 0.80
-    quang_cao_ngay:    float = 0.70
-    nut_tick_dang_bao: float = 0.70
+    quang_cao_ngay:    float = 0.65
+    nut_tick_dang_bao: float = 0.65
     het_hom_do:        float = 0.75
 
     def get(self, tmpl_name: str) -> float:

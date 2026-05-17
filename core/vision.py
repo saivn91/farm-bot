@@ -302,13 +302,13 @@ def build_farm_sweep(
     num_rows = max(3, len(row_centers))
     path: list[tuple[int, int]] = []
 
-    # Thu gọn 2 đầu một chút (padding) để không click ra ngoài phạm vi đất
-    pad_y = 15
+    # --- ĐÃ CHỈNH SỬA: Đưa padding về 0 để không bị thu hẹp lộ trình ---
+    pad_y = 0
     start_iy = min_iy + pad_y
     end_iy = max_iy - pad_y
 
     for i in range(num_rows):
-                # Tọa độ X (iso_x) của hàng hiện tại
+        # Tọa độ X (iso_x) của hàng hiện tại
         t = i / max(num_rows - 1, 1)
         ix = min_ix + t * (max_ix - min_ix)
 
