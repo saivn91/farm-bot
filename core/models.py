@@ -69,13 +69,23 @@ class TemplateThresholds:
     lua_hat_giong: float = 0.75
     lua_thu_hoach: float = 0.55   
     kho_day:       float = 0.75
-    dong_x:        float = 0.80
-    cho:           float = 0.75
-    thung_hang:    float = 0.75
-    thung_ban:     float = 0.75
+    
+    # --- Su dung 2 nut dong_x va ha nguong xuong 0.6 ---
+    dong_x:        float = 0.60
+    dong_x_2:      float = 0.60
+    
+    cua_hang:      float = 0.75
+    thung_trong:   float = 0.75
+    thung_da_ban:  float = 0.75
     tao_rao_ban:   float = 0.80
-    lua_kho:       float = 0.75
     nut_cong:      float = 0.80
+    # --- Cac nguong cho viec ban hang ---
+    kho_nong_san_shop: float = 0.75
+    lua_kho:           float = 0.75
+    mui_ten_phai:      float = 0.80
+    quang_cao_ngay:    float = 0.70
+    nut_tick_dang_bao: float = 0.70
+    het_hom_do:        float = 0.75
 
     def get(self, tmpl_name: str) -> float:
         key = tmpl_name.replace(".png", "").replace(".jpg", "")
@@ -98,9 +108,11 @@ class FarmStats:
 class BotInstance:
     id:          int
     emu_index:   int       = 0
-    name:        str       = ""   # Tên hiển thị do người dùng tự đặt
+    name:        str       = ""
     adb_serial:  str       = ""
     adb_path:    str       = "adb"
+    tesseract_path: str    = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+    
     crop_mode:   CropType  = CropType.LUA
     enable_shop: bool      = True
     debug_mode:  bool      = True
@@ -110,6 +122,8 @@ class BotInstance:
     farm_region:     Optional[FarmRegion] = None
     status:          str   = BotStatus.IDLE
     is_running:      bool  = False
+    max_cells:       int   = 0 
+    
     last_plant_time: float = 0.0
     pct_grown:       float = 0.0
     pct_empty:       float = 0.0
@@ -118,7 +132,6 @@ class BotInstance:
     logs:  list      = field(default_factory=list)
 
     def get_display_name(self) -> str:
-        """Trả về tên người dùng tự đặt, nếu trống thì dùng tên mặc định LDPlayer."""
         if self.name.strip():
             return self.name.strip()
         return f"LDPlayer-{self.emu_index}" if self.emu_index > 0 else "LDPlayer"

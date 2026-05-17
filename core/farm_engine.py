@@ -38,6 +38,10 @@ class FarmEngine:
         self._stop  = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self.adb:     Optional[AdbController]    = None
+        self.debug_counter = 0
+        
+        # --- BIẾN TOÀN CỤC: Ghi nhớ trạng thái có đủ lúa để bán không ---
+        self.can_sell_crops = True 
 
     # ── Public API ────────────────────────────────────────────────────────────
 
@@ -53,22 +57,17 @@ class FarmEngine:
             name=f"Bot-{self.inst.id}",
         )
         self._thread.start()
-        self._log(f"Khoi dong | Cay: {self.inst.crop_mode.label()}")
+        self._log(f"Khởi động | Cây: {self.inst.crop_mode.label()}")
 
     def stop(self):
         self._stop.set()
         self.inst.is_running = False
         self.inst.status     = BotStatus.STOPPED
-        self._log("Da dung bot.")
+        self._log("Đã dừng bot.")
 
     def force_scan(self):
-        """
-        Xoa farm_region hien tai.
-        Vong lap chinh se quet lai o dat ngay vong tiep theo.
-        Dung khi camera bi lech hay muon refresh toa do vung farm.
-        """
         self.inst.farm_region = None
-        self._log("Yeu cau quet lai vung farm...")
+        self._log("Yêu cầu quét lại vùng farm...")
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -79,7 +78,6 @@ class FarmEngine:
             self.on_log(msg)
 
     def _sleep(self, ms: int):
-        """Sleep co the bi ngat khi stop duoc goi."""
         end = time.time() + ms / 1000.0
         while time.time() < end:
             if self._stop.is_set():
@@ -93,24 +91,18 @@ class FarmEngine:
         self.adb.tap(x, y, delay_ms)
 
     def _th(self, tmpl_name: str) -> float:
-        """Lay nguong nhan dien cua template tu config instance."""
         return self.inst.thresholds.get(tmpl_name)
 
     def _debug_save(self, screen: np.ndarray, step: str, **kw) -> None:
-        """Luu anh debug neu debug_mode dang bat."""
         if not self.inst.debug_mode or screen is None:
             return
-        annotated = draw_debug(screen, label=step, **kw)
-        path = save_debug(annotated, step, inst_id=self.inst.id)
-        self._log(f"[DEBUG] Luu anh: {path}")
+        self.debug_counter += 1
+        step_with_counter = f"{self.debug_counter}_{step}"
+        annotated = draw_debug(screen, label=step_with_counter, **kw)
+        path = save_debug(annotated, step_with_counter, inst_id=self.inst.id)
+        self._log(f"[DEBUG] Lưu ảnh: {path}")
 
-    def _interp(
-        self,
-        p1:    tuple[int, int],
-        p2:    tuple[int, int],
-        steps: int = 8,
-    ) -> list[tuple[int, int]]:
-        """Tao cac diem trung gian giua p1 va p2 (khong bao gom p1, co p2)."""
+    def _interp(self, p1: tuple[int, int], p2: tuple[int, int], steps: int = 8) -> list[tuple[int, int]]:
         return [
             (
                 int(p1[0] + (p2[0] - p1[0]) * i / steps),
@@ -119,21 +111,113 @@ class FarmEngine:
             for i in range(1, steps + 1)
         ]
 
-    def _jiggle(
-        self,
-        pts: list[tuple[int, int]],
-        amp: int = 8,
-    ) -> list[tuple[int, int]]:
-        """Them nhieu ngau nhien nho vao tung diem de tranh bot bi nhan dien."""
-        return [
-            (x + random.randint(-amp, amp), y + random.randint(-amp, amp))
-            for x, y in pts
-        ]
+    def _jiggle(self, pts: list[tuple[int, int]], amp: int = 8) -> list[tuple[int, int]]:
+        return [(x + random.randint(-amp, amp), y + random.randint(-amp, amp)) for x, y in pts]
+
+    def _close_x(self, screen: Optional[np.ndarray] = None) -> bool:
+        if screen is None:
+            screen = self._shot()
+        if screen is None:
+            self._tap(10, 10)
+            return False
+
+        x_btn = find_one(screen, "dong_x.png", th=self.inst.thresholds)
+        
+        if not x_btn.found:
+            x_btn = find_one(screen, "dong_x_2.png", th=self.inst.thresholds)
+
+        if x_btn.found:
+            self._log(f"Tìm thấy nút X để đóng (score={x_btn.score:.3f}).")
+            self._debug_save(screen, "phat_hien_nut_x_de_dong", tool_pt=(x_btn.x, x_btn.y))
+            self._tap(x_btn.x, x_btn.y)
+            return True
+        else:
+            self._log("Không thấy nút X, dùng tap (10, 10) để đóng tạm.")
+            self._tap(10, 10)
+            return False
+
+    # ── Doc so luong Pytesseract ──────────────────────────────────────────────
+
+    def _read_quantity(self, screen: np.ndarray, match_res) -> int:
+        try:
+            import pytesseract
+            import cv2
+            
+            pytesseract.pytesseract.tesseract_cmd = self.inst.tesseract_path
+            
+            x, y = match_res.x, match_res.y
+            
+            # --- ROI: Kéo rộng sang trái để bao quát 3 chữ số ---
+            x_start = max(0, x - 25)
+            x_end = min(x + 85, screen.shape[1])
+            y_start = max(0, y - 10)
+            y_end = min(screen.shape[0], y + 40)
+            
+            roi = screen[y_start:y_end, x_start:x_end]
+            
+            # Chuyển đổi sang không gian màu HSV
+            hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+            
+            # Lọc màu trắng tinh
+            lower_white = np.array([0, 0, 180])
+            upper_white = np.array([180, 30, 255])
+            mask = cv2.inRange(hsv, lower_white, upper_white)
+            
+            # =========================================================
+            # THUẬT TOÁN TỐI ƯU: XÓA NHIỄU HẠT LÚA (CONNECTED COMPONENTS)
+            # =========================================================
+            
+            # B1: Xói mòn (Erode) để cắt đứt các cầu nối mỏng giữa đốm nhiễu và chữ số
+            kernel = np.ones((2, 2), np.uint8)
+            eroded = cv2.erode(mask, kernel, iterations=1)
+            
+            # B2: Lọc các cụm khối (Connected Components)
+            num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(eroded, connectivity=8)
+            clean_mask = np.zeros_like(eroded)
+            
+            for i in range(1, num_labels): # Bỏ qua background (i=0)
+                h = stats[i, cv2.CC_STAT_HEIGHT]
+                area = stats[i, cv2.CC_STAT_AREA]
+                # Các đốm lúa mờ thường rất nhỏ. Chữ số thật cao khoảng 20px.
+                # Giữ lại các cụm cao > 8px và diện tích > 10.
+                if h > 8 and area > 10:
+                    clean_mask[labels == i] = 255
+                    
+            # B3: Phục hồi và làm đậm chữ số (Dilate)
+            # Dilate 2 lần giúp nét đen dày đặc, Tesseract sẽ đọc chính xác tuyệt đối
+            clean_mask = cv2.dilate(clean_mask, kernel, iterations=2)
+            
+            # Đảo màu: Đổi lõi trắng thành đen, nền thành trắng
+            thresh = cv2.bitwise_not(clean_mask)
+            
+            if self.inst.debug_mode:
+                self.debug_counter += 1
+                save_debug(thresh, f"{self.debug_counter}_ocr_roi_kiem_tra", inst_id=self.inst.id)
+            
+            config = '--psm 7 -c tessedit_char_whitelist=0123456789'
+            text = pytesseract.image_to_string(thresh, config=config)
+            
+            num_str = text.strip()
+            if not num_str:
+                self._log("OCR không đọc được số nào (trả về rỗng). Tạm coi là 999.")
+                return 999
+                
+            num = int(num_str)
+            self._log(f"Đọc được số lượng kho: {num}")
+            return num
+        except Exception as e:
+            self._log(f"Lỗi đọc số OCR: {e}. Tạm coi là 999.")
+            return 999
 
     # ── Farm region ───────────────────────────────────────────────────────────
 
     def _update_region(self, cells: list, screen: Optional[np.ndarray] = None) -> None:
-        """Cap nhat FarmRegion tu danh sach o dat moi detect duoc."""
+        if not cells: return
+
+        if len(cells) > self.inst.max_cells:
+            self.inst.max_cells = len(cells)
+            self._log(f"Đã cập nhật số lượng ô đất tối đa: {self.inst.max_cells} ô")
+
         sweep = build_farm_sweep(cells)
         poly  = compute_polygon(cells)
         bbox  = compute_bbox(cells)
@@ -168,28 +252,17 @@ class FarmEngine:
         anchor:  tuple[int, int],
         sweep:   list[tuple[int, int]],
     ) -> tuple[list[tuple[int, int]], list[float]]:
-        """
-        Xay lo trinh 3 pha cho gesture keo tool (hat giong / luoi liem):
-          Phase A: keo NHANH tu tool -> anchor  (3 buoc, 10ms/buoc)
-          Phase B: DUNG tai anchor               (1 diem, 300ms)
-          Phase C: quet hinh chu nhat vung farm   (moi diem 60ms)
-        Tra ve (path_pts, delays).
-        """
         seg_fast = self._interp(tool_pt, anchor, steps=3)
-
         path: list[tuple[int, int]] = []
         delays: list[float] = []
 
-        # Phase A
         for pt in seg_fast:
             path.append(pt)
             delays.append(0.010)
 
-        # Phase B
         path.append(anchor)
         delays.append(0.300)
 
-        # Phase C
         for pt in sweep:
             path.append(pt)
             delays.append(0.001)
@@ -197,95 +270,79 @@ class FarmEngine:
         return path, delays
 
     def _align_camera(self) -> bool:
-        """
-        Khac phuc loi lech camera: Tap vao anchor de game cuon camera,
-        dong menu, kiem tra va dong popup (neu co), sau do quet lai toa do luoi.
-        """
         r = self.inst.farm_region
         if not r:
             return False
             
-        self._log("Can giua camera de lay toa do chuan...")
+        self._log("Căn giữa camera để lấy tọa độ chuẩn...")
         
-        # 1. Tap vao anchor de game tu dong cuon camera
         self._tap(r.anchor[0], r.anchor[1])
         self._sleep(1500)
         
         if self._stop.is_set():
             return False
             
-        # 2. Tap ra vung an toan (goc trai) de dong menu hat giong/liem
         self._tap(15, 100) 
         self._sleep(1000)
         
-        # 3. Kiem tra xem co vo tinh mo popup nao khong
         screen_check = self._shot()
         if screen_check is not None:
-            # Tim nut X de dong popup
             x_btn = find_one(screen_check, "dong_x.png", th=self.inst.thresholds)
+            if not x_btn.found:
+                x_btn = find_one(screen_check, "dong_x_2.png", th=self.inst.thresholds)
+                
             if x_btn.found:
-                self._log("Phat hien popup la, dang dong...")
+                self._log("Phát hiện popup lạ, đang đóng...")
                 self._tap(x_btn.x, x_btn.y)
-                self._sleep(800)  # Doi popup dong lai han
+                self._sleep(800) 
         
-        # 4. Chup lai man hinh o vi tri chuan (khong bi che) va quet dat
         screen = self._shot()
         if screen is None:
             return False
             
         cells = find_soil_cells(screen, th=self.inst.thresholds)
         if not cells:
-            self._log("Khong thay dat sau khi can giua!")
-            self.inst.farm_region = None
+            self._log("Không thấy đất sau khi căn giữa!")
             return False
             
-        # Cap nhat lai farm_region voi toa do moi toanh
+        self.inst.farm_region = None 
         self._update_region(cells, screen)
         return True
     
     def _recenter_after_action(self):
-        """
-        Dung toan hoc de keo man hinh tra lai vi tri cu sau khi game auto-pan.
-        Vuot tu giua man hinh di mot doan dung bang khoang cach (Last_Cell - Anchor).
-        """
         r = self.inst.farm_region
         if not r or not r.sweep_path:
             return
             
-        # Tính toán vector lệch
         last_x, last_y = r.sweep_path[-1]
         dx = last_x - r.anchor[0]
         dy = last_y - r.anchor[1]
         
-        # Nếu khoảng cách quá nhỏ (dưới 10 pixel), không cần vuốt tránh click nhầm
         if abs(dx) < 10 and abs(dy) < 10:
             return
             
         sw, sh = self.adb._screen_size()
         cx, cy = sw // 2, sh // 2
         
-        self._log(f"Bu tru lech camera: Vuot man hinh keo lai ({dx}, {dy})")
-        # Ra lệnh ADB vuốt màn hình để kéo terrain về chỗ cũ
+        self._log(f"Bù trừ lệch camera: Vuốt màn hình kéo lại ({dx}, {dy})")
         self.adb.run([
             "shell", "input", "swipe", 
             str(cx), str(cy), 
             str(int(cx + dx)), str(int(cy + dy)), 
             "500"
         ])
-        self._sleep(1000) # Đợi màn hình trôi xong
+        self._sleep(1000) 
 
     # ── Harvest cycle ─────────────────────────────────────────────────────────
 
     def _harvest_cycle(self) -> None:
         self.inst.status = BotStatus.HARVESTING
-        self._log("Bat dau gat lua...")
+        self._log("Bắt đầu gặt lúa...")
 
-        # Căn giữa camera trước ---
         if not self._align_camera():
             return
         
         r = self.inst.farm_region
-
         self._tap(r.anchor[0], r.anchor[1])
         self._sleep(1500)
         if self._stop.is_set():
@@ -293,18 +350,14 @@ class FarmEngine:
 
         screen = self._shot()
         if screen is None:
-            self._log("Khong chup duoc man hinh!")
+            self._log("Không chụp được màn hình!")
             return
 
         liem = find_one(screen, "liem.png", th=self.inst.thresholds)
-        self._log(
-            f"Tim liem.png: {'THAY' if liem.found else 'KHONG THAY'} "
-            f"| score={liem.score:.3f} | nguong={self._th('liem.png'):.2f}"
-        )
 
         if not liem.found:
             self._debug_save(screen, "harvest_khong_thay_liem")
-            self._tap(10, 10)
+            self._close_x(screen)
             return
 
         self._debug_save(
@@ -315,18 +368,6 @@ class FarmEngine:
 
         full_path, delays = self._build_tool_path(
             (liem.x, liem.y), r.anchor, r.sweep_path,
-        )
-
-        self._debug_save(
-            screen, "harvest_lo_trinh",
-            tool_pt=(liem.x, liem.y),
-            anchor=r.anchor,
-            polygon=r.polygon,
-            path=[(liem.x, liem.y)] + full_path,
-        )
-        self._log(
-            f"Lo trinh gat: {len(full_path)} diem | "
-            f"({liem.x},{liem.y}) -> anchor -> {r.cell_count} o dat"
         )
 
         self.adb.hold_and_drag_path(
@@ -343,17 +384,20 @@ class FarmEngine:
         if sc2 is not None:
             kho = find_one(sc2, "kho_day.png", th=self.inst.thresholds)
             if kho.found:
-                self._log("Kho day! Dong popup.")
+                self._log("Kho đầy! Đóng popup.")
                 self._debug_save(sc2, "harvest_kho_day")
                 self._tap(kho.x, kho.y)
                 self._sleep(500)
 
-        # ---> GỌI HÀM BÙ TRỪ SAU KHI ĐÃ ĐÓNG POPUP <---
         self._recenter_after_action()
 
         self.inst.stats.total_harvest += r.cell_count
         self.inst.stats.total_cycles  += 1
-        self._log("Gat xong. Chuyen sang gieo hat...")
+        
+        # ---> QUAN TRỌNG: Mở lại khóa bán đồ sau khi gặt thành công <---
+        self.can_sell_crops = True
+        
+        self._log("Gặt xong. Chuyển sang gieo hạt...")
         self._plant_cycle()
 
     # ── Plant cycle ───────────────────────────────────────────────────────────
@@ -361,12 +405,10 @@ class FarmEngine:
     def _plant_cycle(self) -> None:
         self.inst.status = BotStatus.PLANTING
 
-        # --- Căn giữa camera trước ---
         if not self._align_camera():
             return
         
         r = self.inst.farm_region
-
         self._tap(r.anchor[0], r.anchor[1])
         self._sleep(1500)
         if self._stop.is_set():
@@ -374,19 +416,15 @@ class FarmEngine:
 
         screen = self._shot()
         if screen is None:
-            self._log("Khong chup duoc man hinh!")
+            self._log("Không chụp được màn hình!")
             return
 
         seed_name = self.inst.crop_mode.seed_template()
         seed      = find_one(screen, seed_name, th=self.inst.thresholds)
-        self._log(
-            f"Tim {seed_name}: {'THAY' if seed.found else 'KHONG THAY'} "
-            f"| score={seed.score:.3f} | nguong={self._th(seed_name):.2f}"
-        )
 
         if not seed.found:
             self._debug_save(screen, "plant_khong_thay_hat")
-            self._tap(10, 10)
+            self._close_x(screen)
             return
 
         self._debug_save(
@@ -399,18 +437,6 @@ class FarmEngine:
             (seed.x, seed.y), r.anchor, r.sweep_path,
         )
 
-        self._debug_save(
-            screen, "plant_lo_trinh",
-            tool_pt=(seed.x, seed.y),
-            anchor=r.anchor,
-            polygon=r.polygon,
-            path=[(seed.x, seed.y)] + full_path,
-        )
-        self._log(
-            f"Lo trinh gieo: {len(full_path)} diem | "
-            f"({seed.x},{seed.y}) -> anchor -> {r.cell_count} o dat"
-        )
-
         self.adb.hold_and_drag_path(
             hold_pt  = (seed.x, seed.y),
             path_pts = full_path,
@@ -419,11 +445,10 @@ class FarmEngine:
         )
         self._sleep(2000)
 
-        # ---> GỌI HÀM BÙ TRỪ de keo lai toa do cu <---
         self._recenter_after_action()
 
         self.inst.last_plant_time = time.time()
-        self._log("Gieo hat xong.")
+        self._log("Gieo hạt xong.")
 
         if self.inst.enable_shop and not self._stop.is_set():
             self._sales_cycle()
@@ -432,48 +457,136 @@ class FarmEngine:
 
     def _sales_cycle(self) -> None:
         self.inst.status = BotStatus.SELLING
+        self._log("Bắt đầu quá trình vào cửa hàng bán hàng...")
+        
         screen = self._shot()
         if screen is None:
+            self._log("Lỗi: Không chụp được màn hình khi vào shop!")
             return
 
-        cho = find_one(screen, "cho.png", th=self.inst.thresholds)
-        if not cho.found:
+        cua_hang = find_one(screen, "cua_hang.png", th=self.inst.thresholds)
+        self._log(f"Tìm icon cửa hàng (cua_hang.png): {'THẤY' if cua_hang.found else 'KHÔNG THẤY'} | score={cua_hang.score:.3f} | ngưỡng={self._th('cua_hang.png')}")
+        
+        if not cua_hang.found:
+            self._debug_save(screen, "shop_khong_thay_cua_hang")
+            self._log("Không tìm thấy cửa hàng, hủy quá trình bán hàng và quay lại chờ lúa chín.")
             return
 
-        self._tap(cho.x, cho.y)
+        self._log("Đã thấy cửa hàng, đang tap mở...")
+        self._tap(cua_hang.x, cua_hang.y)
         self._sleep(2000)
         if self._stop.is_set():
             return
 
-        sc2 = self._shot()
-        if sc2 is None:
-            return
+        max_swipes = 15 
+        swipes = 0
 
-        self._debug_save(sc2, "ban_hang_cho")
+        while not self._stop.is_set() and swipes < max_swipes:
+            sc2 = self._shot()
+            if sc2 is None:
+                break
 
-        for sold in find_all(sc2, "thung_ban.png", th=self.inst.thresholds):
-            self._tap(sold.x, sold.y)
-            self._sleep(500)
-            if self._stop.is_set():
-                return
+            self._debug_save(sc2, "ban_hang_trong_cua_hang")
 
-        for crate in find_all(sc2, "thung_hang.png", th=self.inst.thresholds)[:2]:
-            if self._stop.is_set():
-                return
-            self._tap(crate.x, crate.y)
-            self._sleep(900)
-            sc3 = self._shot()
-            if sc3 is not None:
-                btn = find_one(sc3, "tao_rao_ban.png", th=self.inst.thresholds)
-                if btn.found:
-                    self._tap(btn.x, btn.y)
-            self._sleep(700)
+            thung_da_ban_list = find_all(sc2, "thung_da_ban.png", th=self.inst.thresholds)
+            if thung_da_ban_list:
+                self._log(f"Tìm thấy {len(thung_da_ban_list)} thùng đã bán, đang thu tiền...")
+                
+            for sold in thung_da_ban_list:
+                self._tap(sold.x, sold.y)
+                self._sleep(500)
+                if self._stop.is_set():
+                    return
 
-        sc4 = self._shot()
-        if sc4 is not None:
-            x_btn = find_one(sc4, "dong_x.png", th=self.inst.thresholds)
-            if x_btn.found:
-                self._tap(x_btn.x, x_btn.y)
+            # --- KIỂM TRA: Chỉ bán hàng nếu cờ còn đủ lúa đang Bật ---
+            if self.can_sell_crops:
+                crates = find_all(sc2, "thung_trong.png", th=self.inst.thresholds)
+                for crate in crates:
+                    if self._stop.is_set():
+                        return
+                    
+                    if not self.can_sell_crops: 
+                        break
+
+                    self._log("Đang tap vào thùng trống để tạo rao bán...")
+                    self._tap(crate.x, crate.y)
+                    self._sleep(1000)
+                    
+                    sc_menu = self._shot()
+                    if sc_menu is not None:
+                        kho_ns = find_one(sc_menu, "kho_nong_san_shop.png", th=self.inst.thresholds)
+                        if kho_ns.found:
+                            self._tap(kho_ns.x, kho_ns.y)
+                            self._sleep(800)
+                            sc_menu = self._shot()
+                        else:
+                            self._log("Cảnh báo: Không tìm thấy tab kho nông sản.")
+                            self._debug_save(sc_menu, "shop_khong_thay_kho_nong_san")
+                        
+                        lua_kho = find_one(sc_menu, "lua_kho.png", th=self.inst.thresholds)
+                        if lua_kho.found:
+                            so_luong = self._read_quantity(sc_menu, lua_kho)
+                            self._log(f"Số lượng lúa trong kho OCR đọc được: {so_luong}. Số đất trống đã lưu: {self.inst.max_cells}")
+                            
+                            if so_luong > self.inst.max_cells + 10:
+                                self._tap(lua_kho.x, lua_kho.y)
+                                self._sleep(500)
+                                
+                                sc_max = self._shot()
+                                if sc_max is not None:
+                                    mui_ten = find_one(sc_max, "mui_ten_phai.png", th=self.inst.thresholds)
+                                    if mui_ten.found:
+                                        self._tap(mui_ten.x, mui_ten.y)
+                                        self._sleep(500)
+                                
+                                sc_qc = self._shot()
+                                if sc_qc is not None:
+                                    qc = find_one(sc_qc, "quang_cao_ngay.png", th=self.inst.thresholds)
+                                    if qc.found:
+                                        nut_tick = find_one(sc_qc, "nut_tick_dang_bao.png", th=self.inst.thresholds)
+                                        if nut_tick.found:
+                                            self._tap(nut_tick.x, nut_tick.y)
+                                            self._sleep(500)
+                                
+                                sc_tao_ban = self._shot()
+                                if sc_tao_ban is not None:
+                                    tao_ban = find_one(sc_tao_ban, "tao_rao_ban.png", th=self.inst.thresholds)
+                                    if tao_ban.found:
+                                        self._log("Nhấn nút 'Tạo rao bán'.")
+                                        self._tap(tao_ban.x, tao_ban.y)
+                                        self._sleep(800)
+                            else:
+                                self.can_sell_crops = False 
+                                self._log(f"Số lượng lúa ({so_luong}) không đủ an toàn. Ngừng hoàn toàn việc click thùng trống.")
+                                self._close_x(sc_menu)
+                                self._sleep(800)
+                                break 
+                        else:
+                            self.can_sell_crops = False 
+                            self._log("Cảnh báo: Không tìm thấy icon lúa trong shop. Ngừng hoàn toàn việc click thùng trống.")
+                            self._debug_save(sc_menu, "shop_khong_thay_lua")
+                            self._close_x(sc_menu)
+                            self._sleep(800)
+                            break 
+
+            het_hom = find_one(sc2, "het_hom_do.png", th=self.inst.thresholds)
+            if het_hom.found:
+                self._log("Đã cuộn đến hết hòm đồ, dừng bán.")
+                break 
+
+            self._log("Cuộn màn hình sang hòm đồ tiếp theo...")
+            sw, sh = self.adb._screen_size()
+            self.adb.run([
+                "shell", "input", "swipe", 
+                str(int(sw*0.8)), str(int(sh*0.5)), 
+                str(int(sw*0.2)), str(int(sh*0.5)), 
+                "500"
+            ])
+            self._sleep(1500)
+            swipes += 1
+
+        self._log("Hoàn tất duyệt shop, đóng cửa hàng.")
+        self._close_x()
 
     # ── Main loop ─────────────────────────────────────────────────────────────
 
@@ -485,22 +598,18 @@ class FarmEngine:
         ok, msg = self.adb.full_connect()
         if not ok:
             self.inst.status = BotStatus.ERROR
-            self._log(f"Loi ADB: {msg}")
+            self._log(f"Lỗi ADB: {msg}")
             return
 
         self.inst.adb_serial = self.adb.serial
         self._log(f"ADB: {msg}")
 
-        # Detect va cache thong tin cam ung / man hinh truoc khi vao vong lap chinh
         try:
             sw, sh = self.adb._screen_size()
             dev, mx, my = self.adb._detect_touch_device()
-            self._log(
-                f"Man hinh: {sw}x{sh} | "
-                f"Touch device: {dev} (max_x={mx}, max_y={my})"
-            )
+            self._log(f"Màn hình: {sw}x{sh} | Touch device: {dev}")
         except Exception as e:
-            self._log(f"[WARN] Khong detect duoc touch device: {e}")
+            self._log(f"[WARN] Không detect được touch device: {e}")
 
         while not self._stop.is_set():
             try:
@@ -509,24 +618,23 @@ class FarmEngine:
                     self._sleep(3000)
                     continue
 
-                # Quet lai vung farm theo camera hien tai
                 cells    = find_soil_cells(screen, th=self.inst.thresholds)
                 was_init = self.inst.farm_region is not None
 
                 if cells:
                     self._update_region(cells, screen if not was_init else None)
                     if not was_init:
-                        self._log(f"Da dinh vi vung farm ({len(cells)} o dat).")
+                        self._log(f"Đã định vị vùng farm ({len(cells)} ô đất).")
 
                 if not self.inst.farm_region:
                     self.inst.status = BotStatus.SCANNING
                     self._debug_save(screen, "scanning_chua_thay_dat")
-                    self._log("Chua thay dat trong. Thu lai sau 5s...")
+                    self._log("Chưa thấy đất trống. Thử lại sau 5s...")
                     self._sleep(5000)
                     continue
 
                 r    = self.inst.farm_region
-                bbox = r.bbox  # (left, top, right, bottom)
+                bbox = r.bbox  
 
                 grown = find_grown_crops(
                     screen,
@@ -545,26 +653,26 @@ class FarmEngine:
                 self.inst.pct_grown = len(valid_grown) / total * 100
                 self.inst.pct_empty = len(valid_empty) / total * 100
 
-                self._log(
-                    f"Chin {self.inst.pct_grown:.0f}% "
-                    f"({len(valid_grown)}/{total}) | "
-                    f"Trong {self.inst.pct_empty:.0f}%"
-                )
-
                 if self.inst.pct_grown >= 50:
                     self._harvest_cycle()
                 elif self.inst.pct_empty >= 50:
                     self._plant_cycle()
                 else:
                     self.inst.status = BotStatus.WAITING
-                    sec     = self.inst.seconds_until_ready()
-                    wait_ms = min(sec * 1000, 15_000) if sec > 0 else 10_000
-                    self._log(f"Dang cho... Con {sec}s.")
-                    self._sleep(wait_ms)
+                    sec = self.inst.seconds_until_ready()
+                    
+                    if self.inst.enable_shop:
+                        self._log(f"Đang chờ... Còn {sec}s. Tranh thủ vào shop thu tiền/bán hàng.")
+                        self._sales_cycle()
+                        self._sleep(3000) 
+                    else:
+                        wait_ms = min(sec * 1000, 15_000) if sec > 0 else 10_000
+                        self._log(f"Đang chờ... Còn {sec}s.")
+                        self._sleep(wait_ms)
 
             except Exception as e:
-                self._log(f"Loi vong lap: {e}")
-                logger.exception(f"[Bot-{self.inst.id}] Loi:")
+                self._log(f"Lỗi vòng lặp: {e}")
+                logger.exception(f"[Bot-{self.inst.id}] Lỗi:")
                 self._sleep(5000)
 
         self.inst.status = BotStatus.STOPPED

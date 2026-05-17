@@ -30,16 +30,24 @@ class SettingsPanel(ctk.CTkScrollableFrame):
 
         ctk.CTkLabel(glob, text="Cài đặt hệ thống", font=ctk.CTkFont(size=13, weight="bold")).grid(row=0, column=0, columnspan=3, sticky="w", padx=12, pady=(10, 4))
         
+        # ADB
         ctk.CTkLabel(glob, text="Đường dẫn ADB:").grid(row=1, column=0, padx=12, pady=5, sticky="w")
         self._adb_var = ctk.StringVar(value=self.settings.get("adb_path", "adb"))
         ctk.CTkEntry(glob, textvariable=self._adb_var).grid(row=1, column=1, padx=6, pady=5, sticky="ew")
         ctk.CTkButton(glob, text="Chọn file", width=74, command=self._browse_adb).grid(row=1, column=2, padx=(0, 12), pady=5)
 
-        ctk.CTkLabel(glob, text="Giao diện:").grid(row=2, column=0, padx=12, pady=5, sticky="w")
-        self._theme_var = ctk.StringVar(value=self.settings.get("theme", "dark"))
-        ctk.CTkComboBox(glob, values=["dark", "light", "system"], variable=self._theme_var, width=120).grid(row=2, column=1, padx=6, pady=5, sticky="w")
+        # Tesseract OCR
+        ctk.CTkLabel(glob, text="Đường dẫn OCR (Tesseract):").grid(row=2, column=0, padx=12, pady=5, sticky="w")
+        self._tesseract_var = ctk.StringVar(value=self.settings.get("tesseract_path", r"C:\Program Files\Tesseract-OCR\tesseract.exe"))
+        ctk.CTkEntry(glob, textvariable=self._tesseract_var).grid(row=2, column=1, padx=6, pady=5, sticky="ew")
+        ctk.CTkButton(glob, text="Chọn file", width=74, command=self._browse_tesseract).grid(row=2, column=2, padx=(0, 12), pady=5)
 
-        ctk.CTkButton(glob, text="Lưu cài đặt", fg_color="#1e6e3a", hover_color="#155228", command=self._save).grid(row=3, column=0, columnspan=3, padx=12, pady=(4, 12), sticky="e")
+        # Theme
+        ctk.CTkLabel(glob, text="Giao diện:").grid(row=3, column=0, padx=12, pady=5, sticky="w")
+        self._theme_var = ctk.StringVar(value=self.settings.get("theme", "dark"))
+        ctk.CTkComboBox(glob, values=["dark", "light", "system"], variable=self._theme_var, width=120).grid(row=3, column=1, padx=6, pady=5, sticky="w")
+
+        ctk.CTkButton(glob, text="Lưu cài đặt", fg_color="#1e6e3a", hover_color="#155228", command=self._save).grid(row=4, column=0, columnspan=3, padx=12, pady=(4, 12), sticky="e")
 
         hdr = ctk.CTkFrame(self, fg_color="transparent")
         hdr.grid(row=1, column=0, sticky="ew", padx=10, pady=(4, 0))
@@ -67,7 +75,6 @@ class SettingsPanel(ctk.CTkScrollableFrame):
 
         ctk.CTkLabel(f, text="Tên hiển thị (Tuỳ chọn):").grid(row=1, column=0, padx=12, pady=4, sticky="w")
         name_var = ctk.StringVar(value=inst.name)
-        # SỬA Ở ĐÂY: Dùng trace_add để lưu giá trị vào bộ nhớ ngay tức khắc khi bạn gõ từng phím
         name_var.trace_add("write", lambda *args, v=name_var, i=inst: setattr(i, "name", v.get().strip()))
         name_e   = ctk.CTkEntry(f, textvariable=name_var, width=180, placeholder_text=f"VD: Nông trại {inst.id}")
         name_e.grid(row=1, column=1, padx=6, pady=4, sticky="w")
@@ -80,7 +87,6 @@ class SettingsPanel(ctk.CTkScrollableFrame):
 
         ctk.CTkLabel(f, text="Cổng ADB Serial:").grid(row=3, column=0, padx=12, pady=4, sticky="w")
         ser_var = ctk.StringVar(value=inst.adb_serial)
-        # SỬA Ở ĐÂY: Dùng trace_add tương tự như tên hiển thị
         ser_var.trace_add("write", lambda *args, v=ser_var, i=inst: setattr(i, "adb_serial", v.get().strip()))
         ser_e   = ctk.CTkEntry(f, textvariable=ser_var, width=220, placeholder_text="VD: 127.0.0.1:5554 (Để trống = Tự tìm)")
         ser_e.grid(row=3, column=1, padx=6, pady=4, sticky="ew")
@@ -102,6 +108,10 @@ class SettingsPanel(ctk.CTkScrollableFrame):
     def _browse_adb(self):
         path = filedialog.askopenfilename(title="Chọn file adb.exe", filetypes=[("Executable", "*.exe"), ("All files", "*.*")])
         if path: self._adb_var.set(path)
+        
+    def _browse_tesseract(self):
+        path = filedialog.askopenfilename(title="Chọn file tesseract.exe", filetypes=[("Executable", "*.exe"), ("All files", "*.*")])
+        if path: self._tesseract_var.set(path)
 
     def _test_adb(self, inst: BotInstance):
         result = self.on_test_adb(inst.id)
@@ -114,11 +124,13 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         self.on_add()
 
     def _save(self):
-        self.focus() # Ép thoát con trỏ chuột khỏi ô nhập liệu để hoàn thành lệnh
+        self.focus() 
         self.settings["adb_path"] = self._adb_var.get().strip()
+        self.settings["tesseract_path"] = self._tesseract_var.get().strip()
         self.settings["theme"]    = self._theme_var.get()
         for inst in self.instances:
             inst.adb_path = self.settings["adb_path"]
+            inst.tesseract_path = self.settings["tesseract_path"]
         ctk.set_appearance_mode(self.settings["theme"])
         self.on_save()
         messagebox.showinfo("Đã lưu", "Cài đặt đã được cập nhật thành công.")

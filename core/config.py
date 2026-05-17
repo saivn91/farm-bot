@@ -15,9 +15,10 @@ CFG_DIR  = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "Far
 CFG_FILE = os.path.join(CFG_DIR, "config.json")
 
 DEFAULT_SETTINGS = {
-    "adb_path":      "adb",
-    "num_instances": 1,
-    "theme":         "dark",
+    "adb_path":       "adb",
+    "tesseract_path": r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+    "num_instances":  1,
+    "theme":          "dark",
 }
 
 def _thresholds_to_dict(th: TemplateThresholds) -> dict:
@@ -34,15 +35,16 @@ def save(instances: List[BotInstance], settings: dict) -> None:
         "settings": {k: settings.get(k, v) for k, v in DEFAULT_SETTINGS.items()},
         "instances": [
             {
-                "id":          inst.id,
-                "name":        inst.name,
-                "emu_index":   inst.emu_index,
-                "adb_serial":  inst.adb_serial,
-                "adb_path":    inst.adb_path,
-                "crop_mode":   int(inst.crop_mode),
-                "enable_shop": inst.enable_shop,
-                "debug_mode":  inst.debug_mode,
-                "thresholds":  _thresholds_to_dict(inst.thresholds),
+                "id":             inst.id,
+                "name":           inst.name,
+                "emu_index":      inst.emu_index,
+                "adb_serial":     inst.adb_serial,
+                "adb_path":       inst.adb_path,
+                "tesseract_path": inst.tesseract_path,
+                "crop_mode":      int(inst.crop_mode),
+                "enable_shop":    inst.enable_shop,
+                "debug_mode":     inst.debug_mode,
+                "thresholds":     _thresholds_to_dict(inst.thresholds),
             }
             for inst in instances
         ],
@@ -74,15 +76,16 @@ def load() -> tuple[List[BotInstance], dict]:
         try:
             th_dict = d.get("thresholds", {})
             inst = BotInstance(
-                id          = int(d.get("id", 0)),
-                name        = str(d.get("name", "")),
-                emu_index   = int(d.get("emu_index", 0)),
-                adb_serial  = str(d.get("adb_serial", "")),
-                adb_path    = str(d.get("adb_path", settings["adb_path"])),
-                crop_mode   = CropType(int(d.get("crop_mode", 0))),
-                enable_shop = bool(d.get("enable_shop", True)),
-                debug_mode  = bool(d.get("debug_mode", True)),
-                thresholds  = _thresholds_from_dict(th_dict),
+                id             = int(d.get("id", 0)),
+                name           = str(d.get("name", "")),
+                emu_index      = int(d.get("emu_index", 0)),
+                adb_serial     = str(d.get("adb_serial", "")),
+                adb_path       = str(d.get("adb_path", settings["adb_path"])),
+                tesseract_path = str(d.get("tesseract_path", settings.get("tesseract_path", r"C:\Program Files\Tesseract-OCR\tesseract.exe"))),
+                crop_mode      = CropType(int(d.get("crop_mode", 0))),
+                enable_shop    = bool(d.get("enable_shop", True)),
+                debug_mode     = bool(d.get("debug_mode", True)),
+                thresholds     = _thresholds_from_dict(th_dict),
             )
             instances.append(inst)
         except Exception as e:
