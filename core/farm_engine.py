@@ -146,11 +146,10 @@ class FarmEngine:
             pytesseract.pytesseract.tesseract_cmd = self.inst.tesseract_path
             x, y = match_res.x, match_res.y
             
-            # --- ĐÃ SỬA: Kéo chiều cao xuống sâu hơn (y+55) để quét toàn bộ phần đáy chữ số ---
             x_start = max(0, x - 25)
             x_end = min(x + 85, screen.shape[1])
             y_start = max(0, y - 10)
-            y_end = min(screen.shape[0], y + 55) 
+            y_end = min(screen.shape[0], y + 60) 
             
             roi = screen[y_start:y_end, x_start:x_end]
             hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
@@ -182,16 +181,14 @@ class FarmEngine:
             text = pytesseract.image_to_string(thresh, config=config)
             
             num_str = text.strip()
-            # --- ĐÃ SỬA: Trả về 0 thay vì 999 ---
             if not num_str:
                 self._log("OCR không đọc được số nào (trả về rỗng). Tạm coi là 0.")
                 return 0
                 
             num = int(num_str)
-            self._log(f"Đọc được số lượng kho: {num}")
+            # self._log(f"Đọc được số lượng kho: {num}")
             return num
         except Exception as e:
-            # --- ĐÃ SỬA: Trả về 0 thay vì 999 ---
             self._log(f"Lỗi đọc số OCR: {e}. Tạm coi là 0.")
             return 0
 
@@ -462,8 +459,9 @@ class FarmEngine:
         
         self.can_sell_crops = True
         
-        self._log("Gặt xong. Chuyển sang gieo hạt...")
-        self._plant_cycle()
+        self._log("Gặt xong. Đợi vòng lặp chính quét lại mẫu đất mới để gieo hạt...")
+        self.inst.farm_region = None
+        self.inst.last_plant_time = 0  
 
     # ── Plant cycle ───────────────────────────────────────────────────────────
 
@@ -559,11 +557,17 @@ class FarmEngine:
             if thung_da_ban_list:
                 self._log(f"Tìm thấy {len(thung_da_ban_list)} thùng đã bán, đang thu tiền...")
                 
-            for sold in thung_da_ban_list:
-                self._tap(sold.x, sold.y)
-                self._sleep(500)
-                if self._stop.is_set():
-                    return
+                for sold in thung_da_ban_list:
+                    self._tap(sold.x, sold.y)
+                    self._sleep(500)
+                    if self._stop.is_set():
+                        return
+                        
+                self._log("Đang tải lại quầy hàng để tìm thùng trống...")
+                self._sleep(50) 
+                sc2 = self._shot()
+                if sc2 is None:
+                    break
 
             if self.can_sell_crops:
                 crates = find_all(sc2, "thung_trong.png", th=self.inst.thresholds)
@@ -580,14 +584,14 @@ class FarmEngine:
                     
                     sc_menu = self._shot()
                     if sc_menu is not None:
-                        kho_ns = find_one(sc_menu, "kho_nong_san_shop.png", th=self.inst.thresholds)
-                        if kho_ns.found:
-                            self._tap(kho_ns.x, kho_ns.y)
-                            self._sleep(800)
-                            sc_menu = self._shot()
-                        else:
-                            self._log("Cảnh báo: Không tìm thấy tab kho nông sản.")
-                            self._debug_save(sc_menu, "shop_khong_thay_kho_nong_san")
+                        # kho_ns = find_one(sc_menu, "kho_nong_san_shop.png", th=self.inst.thresholds)
+                        # if kho_ns.found:
+                        #     self._tap(kho_ns.x, kho_ns.y)
+                        #     self._sleep(400)
+                        #     sc_menu = self._shot()
+                        # else:
+                        #     self._log("Cảnh báo: Không tìm thấy tab kho nông sản.")
+                        #     self._debug_save(sc_menu, "shop_khong_thay_kho_nong_san")
                         
                         lua_kho = find_one(sc_menu, "lua_kho.png", th=self.inst.thresholds)
                         if lua_kho.found:
@@ -642,10 +646,12 @@ class FarmEngine:
 
             self._log("Cuộn màn hình sang hòm đồ tiếp theo...")
             sw, sh = self.adb._screen_size()
+            
+            # --- ĐÃ CHỈNH SỬA: Rút ngắn khoảng cách vuốt còn 40% để chống trượt cột ---
             self.adb.run([
                 "shell", "input", "swipe", 
-                str(int(sw*0.8)), str(int(sh*0.5)), 
-                str(int(sw*0.2)), str(int(sh*0.5)), 
+                str(int(sw*0.75)), str(int(sh*0.5)), 
+                str(int(sw*0.35)), str(int(sh*0.5)), 
                 "500"
             ])
             self._sleep(1500)
@@ -729,11 +735,14 @@ class FarmEngine:
                 sec = self.inst.seconds_until_ready()
                 is_time_up = (self.inst.last_plant_time > 0 and sec == 0)
 
-                if is_time_up or (self.inst.last_plant_time == 0 and self.inst.pct_grown >= 50):
+                if is_time_up:
                     self._harvest_cycle()
                 
                 elif self.inst.pct_empty >= 40:
                     self._plant_cycle()
+                
+                elif self.inst.last_plant_time == 0 and self.inst.pct_grown >= 50:
+                    self._harvest_cycle()
                 
                 else:
                     self.inst.status = BotStatus.WAITING
