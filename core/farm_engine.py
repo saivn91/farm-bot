@@ -88,7 +88,7 @@ class FarmEngine:
     def _shot(self) -> Optional[np.ndarray]:
         return self.adb.screenshot()
 
-    def _tap(self, x: int, y: int, delay_ms: int = 200):
+    def _tap(self, x: int, y: int, delay_ms: int = 100):
         self.adb.tap(x, y, delay_ms)
 
     def _th(self, tmpl_name: str) -> float:
@@ -433,7 +433,7 @@ class FarmEngine:
         self.adb.hold_and_drag_path(
             hold_pt  = (liem.x, liem.y),
             path_pts = full_path,
-            hold_ms  = 400,
+            hold_ms  = 200,
             delays   = delays,
         )
         self._sleep(2500)
@@ -452,7 +452,7 @@ class FarmEngine:
                 self.can_sell_crops = True
                 
                 if self.inst.enable_shop and not self._stop.is_set():
-                    self._sales_cycle()
+                    self._sales_cycle(keep_seeds=True)
 
         self.inst.stats.total_harvest += self.inst.max_cells if self.inst.max_cells > 0 else r.cell_count
         self.inst.stats.total_cycles  += 1
@@ -508,7 +508,7 @@ class FarmEngine:
         self.adb.hold_and_drag_path(
             hold_pt  = (seed.x, seed.y),
             path_pts = full_path,
-            hold_ms  = 400,
+            hold_ms  = 200,
             delays   = delays,
         )
         self._sleep(2000)
@@ -517,11 +517,11 @@ class FarmEngine:
         self._log("Gieo hạt xong. Bắt đầu đếm ngược...")
 
         if self.inst.enable_shop and not self._stop.is_set():
-            self._sales_cycle()
+            self._sales_cycle(keep_seeds=False)
 
     # ── Sales cycle ───────────────────────────────────────────────────────────
 
-    def _sales_cycle(self) -> None:
+    def _sales_cycle(self, keep_seeds: bool = False) -> None:
         self.inst.status = BotStatus.SELLING
         self._log("Bắt đầu quá trình vào cửa hàng bán hàng...")
         
@@ -534,7 +534,7 @@ class FarmEngine:
         
         if not cua_hang.found:
             self._debug_save(screen, "shop_khong_thay_cua_hang")
-            self._log("Không tìm thấy cửa hàng, hủy quá trình bán hàng và quay lại chờ lúa chín.")
+            self._log("Không tìm thấy cửa hàng, hủy quá trình bán hàng và quay lại chờ.")
             return
 
         self._log("Đã thấy cửa hàng, đang tap mở...")
@@ -545,6 +545,12 @@ class FarmEngine:
 
         max_swipes = 15 
         swipes = 0
+        
+        luot_ban_toi_da = -1 
+        
+        # [TỐI ƯU 4] Bộ nhớ đệm (Cache) tọa độ các nút cố định để không quét lại
+        cached_mui_ten = None
+        cached_tao_ban = None
 
         while not self._stop.is_set() and swipes < max_swipes:
             sc2 = self._shot()
@@ -553,90 +559,113 @@ class FarmEngine:
 
             self._debug_save(sc2, "ban_hang_trong_cua_hang")
 
+            # [TỐI ƯU 3] Quét cả thùng đã bán và thùng trống trên CÙNG 1 ẢNH
             thung_da_ban_list = find_all(sc2, "thung_da_ban.png", th=self.inst.thresholds)
+            thung_trong_list = find_all(sc2, "thung_trong.png", th=self.inst.thresholds)
+            
+            # Danh sách tọa độ tổng hợp để tap bán hàng
+            danh_sach_thung_co_the_ban = []
+
             if thung_da_ban_list:
                 self._log(f"Tìm thấy {len(thung_da_ban_list)} thùng đã bán, đang thu tiền...")
-                
                 for sold in thung_da_ban_list:
-                    self._tap(sold.x, sold.y)
-                    self._sleep(500)
+                    self._tap(sold.x, sold.y, 1)
+                    # self._sleep(500)
                     if self._stop.is_set():
                         return
-                        
-                self._log("Đang tải lại quầy hàng để tìm thùng trống...")
-                self._sleep(50) 
-                sc2 = self._shot()
-                if sc2 is None:
-                    break
+                    # Nhận tiền xong, thùng đó lập tức biến thành thùng trống -> Lưu ngay tọa độ
+                    danh_sach_thung_co_the_ban.append((sold.x, sold.y))
 
-            if self.can_sell_crops:
-                crates = find_all(sc2, "thung_trong.png", th=self.inst.thresholds)
-                for crate in crates:
+            # Ghép thêm các thùng trống quét được từ đầu
+            for trong in thung_trong_list:
+                danh_sach_thung_co_the_ban.append((trong.x, trong.y))
+
+            # Bắt đầu vòng lặp bán hàng theo danh sách tọa độ tổng hợp
+            if self.can_sell_crops and danh_sach_thung_co_the_ban:
+                for tx, ty in danh_sach_thung_co_the_ban:
                     if self._stop.is_set():
                         return
                     
                     if not self.can_sell_crops: 
                         break
 
-                    self._log("Đang tap vào thùng trống để tạo rao bán...")
-                    self._tap(crate.x, crate.y)
-                    self._sleep(1000)
+                    self._log("Đang tap vào hòm đồ để bán hàng...")
+                    self._tap(tx, ty)
+                    self._sleep(200)
                     
                     sc_menu = self._shot()
                     if sc_menu is not None:
-                        # kho_ns = find_one(sc_menu, "kho_nong_san_shop.png", th=self.inst.thresholds)
-                        # if kho_ns.found:
-                        #     self._tap(kho_ns.x, kho_ns.y)
-                        #     self._sleep(400)
-                        #     sc_menu = self._shot()
-                        # else:
-                        #     self._log("Cảnh báo: Không tìm thấy tab kho nông sản.")
-                        #     self._debug_save(sc_menu, "shop_khong_thay_kho_nong_san")
-                        
+                        # Chỉ cần tìm vị trí hạt lúa và nút tick đăng báo
                         lua_kho = find_one(sc_menu, "lua_kho.png", th=self.inst.thresholds)
+                        
                         if lua_kho.found:
-                            so_luong = self._read_quantity(sc_menu, lua_kho)
-                            self._log(f"Số lượng lúa trong kho OCR đọc được: {so_luong}. Số đất trống đã lưu: {self.inst.max_cells}")
-                            
-                            if so_luong > self.inst.max_cells + 10:
-                                self._tap(lua_kho.x, lua_kho.y)
-                                self._sleep(500)
+                            # [TỐI ƯU 1 & 2] Tính toán số lượng cần giữ lại dựa theo hoàn cảnh
+                            if luot_ban_toi_da == -1:
+                                so_luong = self._read_quantity(sc_menu, lua_kho)
                                 
-                                sc_max = self._shot()
-                                if sc_max is not None:
-                                    mui_ten = find_one(sc_max, "mui_ten_phai.png", th=self.inst.thresholds)
+                                if keep_seeds:
+                                    an_toan = self.inst.max_cells + 10
+                                    self._log(f"Kho đầy: Phải giữ {an_toan} lúa (Đất: {self.inst.max_cells} + 10). Đang có: {so_luong}")
+                                else:
+                                    an_toan = 10
+                                    self._log(f"Chờ thu hoạch: Chỉ cần giữ {an_toan} lúa. Đang có: {so_luong}")
+                                
+                                if so_luong > an_toan:
+                                    luot_ban_toi_da = (so_luong - an_toan) // 10
+                                    if luot_ban_toi_da < 1:
+                                        luot_ban_toi_da = 1
+                                    self._log(f"=> Cho phép bán tối đa {luot_ban_toi_da} lượt.")
+                                else:
+                                    luot_ban_toi_da = 0
+
+                            # Tiến hành bán nếu còn lượt
+                            if luot_ban_toi_da > 0:
+                                # Tap vào lúa
+                                self._tap(lua_kho.x, lua_kho.y, 1)
+                                # self._sleep(20)
+                                
+                                # [TỐI ƯU 4] Chỉ quét nút mờ 1 lần và nạp vào Cache
+                                if not cached_mui_ten:
+                                    mui_ten = find_one(sc_menu, "mui_ten_phai.png", th=self.inst.thresholds)
                                     if mui_ten.found:
-                                        self._tap(mui_ten.x, mui_ten.y)
-                                        self._sleep(500)
+                                        cached_mui_ten = (mui_ten.x, mui_ten.y)
                                 
-                                sc_qc = self._shot()
-                                if sc_qc is not None:
-                                    qc = find_one(sc_qc, "quang_cao_ngay.png", th=self.inst.thresholds)
-                                    if qc.found:
-                                        nut_tick = find_one(sc_qc, "nut_tick_dang_bao.png", th=self.inst.thresholds)
-                                        if nut_tick.found:
-                                            self._tap(nut_tick.x, nut_tick.y)
-                                            self._sleep(500)
-                                
-                                sc_tao_ban = self._shot()
-                                if sc_tao_ban is not None:
-                                    tao_ban = find_one(sc_tao_ban, "tao_rao_ban.png", th=self.inst.thresholds)
+                                if not cached_tao_ban:
+                                    tao_ban = find_one(sc_menu, "tao_rao_ban.png", th=self.inst.thresholds)
                                     if tao_ban.found:
-                                        self._log("Nhấn nút 'Tạo rao bán'.")
-                                        self._tap(tao_ban.x, tao_ban.y)
-                                        self._sleep(800)
+                                        cached_tao_ban = (tao_ban.x, tao_ban.y)
+                                        
+                                # Dùng Cache để Tap nút Max giá
+                                if cached_mui_ten:
+                                    self._tap(cached_mui_ten[0], cached_mui_ten[1], 1)
+                                    # self._sleep(300)
+                                
+                                # Quét nút Tick đăng báo (Vì đôi lúc bị cooldown không hiện)
+                                qc = find_one(sc_menu, "nut_tick_dang_bao.png", th=self.inst.thresholds)
+                                if qc.found:
+                                    self._tap(qc.x, qc.y, 1)
+                                    # self._sleep(300)
+                                
+                                # Dùng Cache để Tap nút Tạo rao bán
+                                if cached_tao_ban:
+                                    self._tap(cached_tao_ban[0], cached_tao_ban[1])
+                                else:
+                                    self._log("Không tìm thấy nút Tạo rao bán, có thể do UI chưa load kịp.")
+                                    
+                                luot_ban_toi_da -= 1
+                                self._sleep(10)
                             else:
                                 self.can_sell_crops = False 
-                                self._log(f"Số lượng lúa ({so_luong}) không đủ an toàn. Ngừng hoàn toàn việc click thùng trống.")
+                                self._log(f"Số lượng lúa không đủ (Hoặc đã hết lượt bán). Ngừng click hòm đồ.")
                                 self._close_x(sc_menu)
-                                self._sleep(800)
+                                self._sleep(100)
                                 break 
                         else:
                             self.can_sell_crops = False 
-                            self._log("Cảnh báo: Không tìm thấy icon lúa trong shop. Ngừng hoàn toàn việc click thùng trống.")
+                            self._log("Cảnh báo: Không tìm thấy lúa trong shop. Dừng bán.")
                             self._debug_save(sc_menu, "shop_khong_thay_lua")
                             self._close_x(sc_menu)
-                            self._sleep(800)
+                            self._sleep(100)
                             break 
 
             het_hom = find_one(sc2, "het_hom_do.png", th=self.inst.thresholds)
@@ -647,18 +676,37 @@ class FarmEngine:
             self._log("Cuộn màn hình sang hòm đồ tiếp theo...")
             sw, sh = self.adb._screen_size()
             
-            # --- ĐÃ CHỈNH SỬA: Rút ngắn khoảng cách vuốt còn 40% để chống trượt cột ---
             self.adb.run([
                 "shell", "input", "swipe", 
                 str(int(sw*0.75)), str(int(sh*0.5)), 
                 str(int(sw*0.35)), str(int(sh*0.5)), 
                 "500"
             ])
-            self._sleep(1500)
+            self._sleep(500)
             swipes += 1
 
         self._log("Hoàn tất duyệt shop, đóng cửa hàng.")
         self._close_x()
+
+    def _scan_and_tap_sequence(self, screen: np.ndarray, templates: list[str], delay_ms: int = 500) -> None:
+        """
+        [TỐI ƯU] Hàm quét nhiều template trên cùng 1 ảnh duy nhất và tap theo thứ tự.
+        Truyền vào danh sách args (templates), tìm tọa độ của tất cả, sau đó mới tap.
+        """
+        coords_to_tap = []
+        
+        # 1. Quét toàn bộ args trên cùng 1 bức ảnh truyền vào
+        for tmpl in templates:
+            match = find_one(screen, tmpl, th=self.inst.thresholds)
+            if match.found:
+                coords_to_tap.append((tmpl, match.x, match.y))
+            else:
+                self._log(f"Chuỗi tap: Bỏ qua '{tmpl}' do không tìm thấy trên ảnh hiện tại.")
+                
+        # 2. Thực hiện tap lần lượt theo tọa độ đã lưu
+        for tmpl, x, y in coords_to_tap:
+            self._tap(x, y)
+            self._sleep(delay_ms)
 
     # ── Main loop ─────────────────────────────────────────────────────────────
 
@@ -750,8 +798,8 @@ class FarmEngine:
                     if sec > 0:
                         if self.inst.enable_shop:
                             self._log(f"Đang chờ... Còn {sec}s. Tranh thủ vào shop thu tiền/bán hàng.")
-                            self._sales_cycle()
-                            self._sleep(3000) 
+                            self._sales_cycle(keep_seeds=False)
+                            self._sleep(5000) 
                         else:
                             wait_ms = min(sec * 1000, 15_000)
                             self._log(f"Đang chờ... Còn {sec}s.")

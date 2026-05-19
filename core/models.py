@@ -77,12 +77,12 @@ class TemplateThresholds:
     cua_hang:      float = 0.75
     thung_trong:   float = 0.75
     thung_da_ban:  float = 0.75
-    tao_rao_ban:   float = 0.80
+    tao_rao_ban:   float = 0.60
     nut_cong:      float = 0.80
     # --- Cac nguong cho viec ban hang ---
     kho_nong_san_shop: float = 0.75
     lua_kho:           float = 0.75
-    mui_ten_phai:      float = 0.80
+    mui_ten_phai:      float = 0.70
     quang_cao_ngay:    float = 0.65
     nut_tick_dang_bao: float = 0.65
     het_hom_do:        float = 0.75
@@ -115,7 +115,7 @@ class BotInstance:
     
     crop_mode:   CropType  = CropType.LUA
     enable_shop: bool      = True
-    debug_mode:  bool      = True
+    debug_mode:  bool      = False
 
     thresholds: TemplateThresholds = field(default_factory=TemplateThresholds)
 

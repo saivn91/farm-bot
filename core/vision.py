@@ -261,7 +261,7 @@ def build_row_waypoints(
 def build_farm_sweep(
     cells: list[MatchResult],
     row_tol: int = 25,
-    pt_spacing: int = 25,
+    pt_spacing: int = 35,
 ) -> list[tuple[int, int]]:
     """
     Tao lo trinh quet theo truc Isometric cua farm.
