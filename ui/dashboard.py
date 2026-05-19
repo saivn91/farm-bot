@@ -22,12 +22,11 @@ _CROP_LABELS: dict[CropType, str] = {
 }
 
 class InstanceCard(ctk.CTkFrame):
-    def __init__(self, parent, inst: BotInstance, on_start: Callable[[int], None], on_stop: Callable[[int], None], on_scan: Callable[[int], None], **kwargs):
+    def __init__(self, parent, inst: BotInstance, on_start: Callable[[int], None], on_stop: Callable[[int], None], **kwargs):
         super().__init__(parent, corner_radius=10, border_width=1, **kwargs)
         self.inst     = inst
         self.on_start = on_start
         self.on_stop  = on_stop
-        self.on_scan  = on_scan
         self._build()
 
     def _build(self):
@@ -53,34 +52,17 @@ class InstanceCard(ctk.CTkFrame):
         self._countdown_lbl = ctk.CTkLabel(row1, text="", font=ctk.CTkFont(size=11), text_color="gray70")
         self._countdown_lbl.pack(side="left")
 
-        row2 = ctk.CTkFrame(self, fg_color="transparent")
-        row2.grid(row=2, column=0, sticky="ew", padx=12, pady=4)
-        row2.grid_columnconfigure((1, 4), weight=1)
-
-        ctk.CTkLabel(row2, text="Đã chín:", font=ctk.CTkFont(size=11), width=48).grid(row=0, column=0, sticky="w")
-        self._pb_grown = ctk.CTkProgressBar(row2, height=12, corner_radius=4)
-        self._pb_grown.set(0)
-        self._pb_grown.grid(row=0, column=1, sticky="ew", padx=(4, 6))
-        self._pb_grown_lbl = ctk.CTkLabel(row2, text="0%", width=38, font=ctk.CTkFont(size=11))
-        self._pb_grown_lbl.grid(row=0, column=2)
-
-        ctk.CTkLabel(row2, text="Đất trống:", font=ctk.CTkFont(size=11), width=58).grid(row=0, column=3, sticky="w", padx=(10, 0))
-        self._pb_empty = ctk.CTkProgressBar(row2, height=12, corner_radius=4)
-        self._pb_empty.set(0)
-        self._pb_empty.grid(row=0, column=4, sticky="ew", padx=(4, 6))
-        self._pb_empty_lbl = ctk.CTkLabel(row2, text="0%", width=38, font=ctk.CTkFont(size=11))
-        self._pb_empty_lbl.grid(row=0, column=5)
 
         row3 = ctk.CTkFrame(self, fg_color="transparent")
-        row3.grid(row=3, column=0, sticky="ew", padx=12, pady=(2, 0))
+        row3.grid(row=2, column=0, sticky="ew", padx=12, pady=(2, 0))
         self._debug_var = ctk.BooleanVar(value=self.inst.debug_mode)
         ctk.CTkCheckBox(row3, text="Gỡ lỗi (Lưu ảnh nhận diện AI)", variable=self._debug_var, command=self._on_debug_toggle, font=ctk.CTkFont(size=11), checkbox_width=16, checkbox_height=16).pack(side="left")
 
         row4 = ctk.CTkFrame(self, fg_color="transparent")
-        row4.grid(row=4, column=0, sticky="ew", padx=12, pady=(4, 10))
+        row4.grid(row=3, column=0, sticky="ew", padx=12, pady=(4, 10))
         self._toggle_btn = ctk.CTkButton(row4, text="Bắt đầu", width=96, fg_color="#1e6e3a", hover_color="#155228", command=self._on_toggle)
         self._toggle_btn.pack(side="left", padx=(0, 5))
-        ctk.CTkButton(row4, text="Quét lại Farm", width=96, fg_color="#2b2b3d", hover_color="#3a3a55", command=lambda: self.on_scan(self.inst.id)).pack(side="left", padx=(0, 5))
+       
         self._stats_lbl = ctk.CTkLabel(row4, text="", font=ctk.CTkFont(size=10), text_color="gray55")
         self._stats_lbl.pack(side="right")
 
@@ -117,20 +99,14 @@ class InstanceCard(ctk.CTkFrame):
         else:
             self._countdown_lbl.configure(text="")
 
-        self._pb_grown.set(min(inst.pct_grown / 100, 1.0))
-        self._pb_empty.set(min(inst.pct_empty / 100, 1.0))
-        self._pb_grown_lbl.configure(text=f"{inst.pct_grown:.0f}%")
-        self._pb_empty_lbl.configure(text=f"{inst.pct_empty:.0f}%")
-
         self._stats_lbl.configure(text=f"Đã gặt: {inst.stats.total_harvest}  Vòng: {inst.stats.total_cycles}  {inst.stats.session_duration()}")
 
 
 class Dashboard(ctk.CTkScrollableFrame):
-    def __init__(self, parent, instances: list, on_start: Callable[[int], None], on_stop: Callable[[int], None], on_scan: Callable[[int], None], **kwargs):
+    def __init__(self, parent, instances: list, on_start: Callable[[int], None], on_stop: Callable[[int], None], **kwargs):
         super().__init__(parent, **kwargs)
         self.on_start = on_start
         self.on_stop  = on_stop
-        self.on_scan  = on_scan
         self._cards: dict[int, InstanceCard] = {}
         self.refresh_instances(instances)
 
@@ -140,7 +116,7 @@ class Dashboard(ctk.CTkScrollableFrame):
         self._cards.clear()
         self.grid_columnconfigure(0, weight=1)
         for idx, inst in enumerate(instances):
-            card = InstanceCard(self, inst, on_start=self.on_start, on_stop=self.on_stop, on_scan=self.on_scan)
+            card = InstanceCard(self, inst, on_start=self.on_start, on_stop=self.on_stop)
             card.grid(row=idx, column=0, sticky="ew", padx=8, pady=6)
             self._cards[inst.id] = card
 

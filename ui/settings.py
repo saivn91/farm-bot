@@ -79,24 +79,19 @@ class SettingsPanel(ctk.CTkScrollableFrame):
         name_e   = ctk.CTkEntry(f, textvariable=name_var, width=180, placeholder_text=f"VD: Nông trại {inst.id}")
         name_e.grid(row=1, column=1, padx=6, pady=4, sticky="w")
 
-        ctk.CTkLabel(f, text="Chỉ số LDPlayer (Index):").grid(row=2, column=0, padx=12, pady=4, sticky="w")
-        emu_var = ctk.StringVar(value=str(inst.emu_index))
-        emu_e   = ctk.CTkEntry(f, textvariable=emu_var, width=60)
-        emu_e.grid(row=2, column=1, padx=6, pady=4, sticky="w")
-        emu_e.bind("<FocusOut>", lambda e, v=emu_var, i=inst: self._set_int(v, i, "emu_index"))
 
-        ctk.CTkLabel(f, text="Cổng ADB Serial:").grid(row=3, column=0, padx=12, pady=4, sticky="w")
+        ctk.CTkLabel(f, text="Cổng ADB Serial:").grid(row=2, column=0, padx=12, pady=4, sticky="w")
         ser_var = ctk.StringVar(value=inst.adb_serial)
         ser_var.trace_add("write", lambda *args, v=ser_var, i=inst: setattr(i, "adb_serial", v.get().strip()))
-        ser_e   = ctk.CTkEntry(f, textvariable=ser_var, width=220, placeholder_text="VD: 127.0.0.1:5554 (Để trống = Tự tìm)")
-        ser_e.grid(row=3, column=1, padx=6, pady=4, sticky="ew")
+        ser_e   = ctk.CTkEntry(f, textvariable=ser_var, width=220, placeholder_text="VD: 5555, 127.0.0.1:5556 (Để trống = Tự tìm)")
+        ser_e.grid(row=2, column=1, padx=6, pady=4, sticky="ew")
 
-        ctk.CTkLabel(f, text="Cho phép tự động bán hàng:").grid(row=4, column=0, padx=12, pady=4, sticky="w")
+        ctk.CTkLabel(f, text="Cho phép tự động bán hàng:").grid(row=3, column=0, padx=12, pady=4, sticky="w")
         shop_var = ctk.BooleanVar(value=inst.enable_shop)
-        ctk.CTkSwitch(f, variable=shop_var, text="", command=lambda v=shop_var, i=inst: setattr(i, "enable_shop", v.get())).grid(row=4, column=1, padx=6, pady=4, sticky="w")
+        ctk.CTkSwitch(f, variable=shop_var, text="", command=lambda v=shop_var, i=inst: setattr(i, "enable_shop", v.get())).grid(row=3, column=1, padx=6, pady=4, sticky="w")
 
         btn_row = ctk.CTkFrame(f, fg_color="transparent")
-        btn_row.grid(row=5, column=0, columnspan=3, sticky="ew", padx=12, pady=(2, 10))
+        btn_row.grid(row=4, column=0, columnspan=3, sticky="ew", padx=12, pady=(2, 10))
 
         ctk.CTkButton(btn_row, text="Kiểm tra kết nối", width=110, fg_color="gray35", hover_color="gray45", command=lambda i=inst: self._test_adb(i)).pack(side="left", padx=(0, 8))
 

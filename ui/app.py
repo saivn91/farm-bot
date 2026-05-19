@@ -6,7 +6,6 @@ import customtkinter as ctk
 from typing import List
 
 from core.models import BotInstance
-from core.adb import make_adb
 from core.farm_engine import FarmEngine
 import core.config as config
 
@@ -48,7 +47,7 @@ class App(ctk.CTk):
         hdr.grid(row=0, column=0, sticky="ew")
         hdr.grid_propagate(False)
         ctk.CTkLabel(hdr, text="  Farm Bot", font=ctk.CTkFont(size=19, weight="bold"), text_color="#aaddff").pack(side="left", padx=8)
-        ctk.CTkLabel(hdr, text="LDPlayer 1280x720", font=ctk.CTkFont(size=11), text_color="gray55").pack(side="right", padx=12)
+        ctk.CTkLabel(hdr, text="1280x720", font=ctk.CTkFont(size=11), text_color="gray55").pack(side="right", padx=12)
 
         self.tabs = ctk.CTkTabview(self)
         self.tabs.grid(row=1, column=0, sticky="nsew", padx=6, pady=(0, 6))
@@ -56,7 +55,7 @@ class App(ctk.CTk):
         self.tabs.add("Cài đặt")
         self.tabs.add("Log")
 
-        self.dashboard = Dashboard(self.tabs.tab("Dashboard"), self.instances, on_start=self._on_start, on_stop=self._on_stop, on_scan=self._on_scan)
+        self.dashboard = Dashboard(self.tabs.tab("Dashboard"), self.instances, on_start=self._on_start, on_stop=self._on_stop)
         self.dashboard.pack(fill="both", expand=True)
 
         self.settings_panel = SettingsPanel(self.tabs.tab("Cài đặt"), self.instances, self.settings, on_save=self._on_save, on_add=self._on_add, on_remove=self._on_remove, on_test_adb=self._on_test_adb)
@@ -76,16 +75,9 @@ class App(ctk.CTk):
         engine = self.engines.get(inst_id)
         if engine: engine.stop()
 
-    def _on_scan(self, inst_id: int):
-        engine = self.engines.get(inst_id)
-        if engine: engine.force_scan()
-        else:
-            inst = self._get(inst_id)
-            if inst: inst.farm_region = None
-
     def _on_save(self):
         config.save(self.instances, self.settings)
-        # ---> SỬA LỖI Ở ĐÂY: Ép làm mới toàn cục ngay khi lưu <---
+        # Ép làm mới toàn cục ngay khi lưu
         self._refresh_all()
 
     def _on_add(self):
@@ -104,9 +96,20 @@ class App(ctk.CTk):
     def _on_test_adb(self, inst_id: int) -> str:
         inst = self._get(inst_id)
         if inst is None: return "Không tìm thấy giả lập."
-        adb = make_adb(inst.adb_path, inst.emu_index)
-        if inst.adb_serial: adb.serial = inst.adb_serial
+        
+        serial_to_test = inst.adb_serial
+        if serial_to_test and serial_to_test.isdigit():
+            serial_to_test = f"127.0.0.1:{serial_to_test}"
+            
+        from core.adb import AdbController
+        adb = AdbController(adb_path=inst.adb_path, serial=serial_to_test)
         ok, msg = adb.full_connect()
+        
+        if ok:
+            # Ghi đè lại đúng cổng đã nhận vào giao diện cho người dùng thấy
+            inst.adb_serial = adb.serial
+            self.after(0, self.settings_panel.refresh_instances, self.instances)
+            
         return msg
 
     def _on_close(self):

@@ -11,7 +11,7 @@ import cv2
 import numpy as np
 
 from core.models import BotInstance, BotStatus, FarmRegion
-from core.adb import AdbController, make_adb
+from core.adb import AdbController
 from core.vision import (
     find_one,
     find_all,
@@ -63,6 +63,9 @@ class FarmEngine:
         self._stop.set()
         self.inst.is_running = False
         self.inst.status     = BotStatus.STOPPED
+        # Khi Stop sẽ xóa toàn bộ bộ nhớ tọa độ Farm
+        self.inst.farm_region = None
+        self.inst.max_cells = 0 
         self._log("Đã dừng bot.")
 
     def force_scan(self):
@@ -186,7 +189,6 @@ class FarmEngine:
                 return 0
                 
             num = int(num_str)
-            # self._log(f"Đọc được số lượng kho: {num}")
             return num
         except Exception as e:
             self._log(f"Lỗi đọc số OCR: {e}. Tạm coi là 0.")
@@ -548,7 +550,7 @@ class FarmEngine:
         
         luot_ban_toi_da = -1 
         
-        # [TỐI ƯU 4] Bộ nhớ đệm (Cache) tọa độ các nút cố định để không quét lại
+        # Bộ nhớ đệm (Cache) tọa độ các nút cố định để không quét lại
         cached_mui_ten = None
         cached_tao_ban = None
 
@@ -559,7 +561,7 @@ class FarmEngine:
 
             self._debug_save(sc2, "ban_hang_trong_cua_hang")
 
-            # [TỐI ƯU 3] Quét cả thùng đã bán và thùng trống trên CÙNG 1 ẢNH
+            # Quét cả thùng đã bán và thùng trống trên CÙNG 1 ẢNH
             thung_da_ban_list = find_all(sc2, "thung_da_ban.png", th=self.inst.thresholds)
             thung_trong_list = find_all(sc2, "thung_trong.png", th=self.inst.thresholds)
             
@@ -570,7 +572,6 @@ class FarmEngine:
                 self._log(f"Tìm thấy {len(thung_da_ban_list)} thùng đã bán, đang thu tiền...")
                 for sold in thung_da_ban_list:
                     self._tap(sold.x, sold.y, 1)
-                    # self._sleep(500)
                     if self._stop.is_set():
                         return
                     # Nhận tiền xong, thùng đó lập tức biến thành thùng trống -> Lưu ngay tọa độ
@@ -599,7 +600,7 @@ class FarmEngine:
                         lua_kho = find_one(sc_menu, "lua_kho.png", th=self.inst.thresholds)
                         
                         if lua_kho.found:
-                            # [TỐI ƯU 1 & 2] Tính toán số lượng cần giữ lại dựa theo hoàn cảnh
+                            # Tính toán số lượng cần giữ lại dựa theo hoàn cảnh
                             if luot_ban_toi_da == -1:
                                 so_luong = self._read_quantity(sc_menu, lua_kho)
                                 
@@ -622,9 +623,8 @@ class FarmEngine:
                             if luot_ban_toi_da > 0:
                                 # Tap vào lúa
                                 self._tap(lua_kho.x, lua_kho.y, 1)
-                                # self._sleep(20)
-                                
-                                # [TỐI ƯU 4] Chỉ quét nút mờ 1 lần và nạp vào Cache
+
+                                # Chỉ quét nút mờ 1 lần và nạp vào Cache
                                 if not cached_mui_ten:
                                     mui_ten = find_one(sc_menu, "mui_ten_phai.png", th=self.inst.thresholds)
                                     if mui_ten.found:
@@ -638,13 +638,11 @@ class FarmEngine:
                                 # Dùng Cache để Tap nút Max giá
                                 if cached_mui_ten:
                                     self._tap(cached_mui_ten[0], cached_mui_ten[1], 1)
-                                    # self._sleep(300)
                                 
                                 # Quét nút Tick đăng báo (Vì đôi lúc bị cooldown không hiện)
                                 qc = find_one(sc_menu, "nut_tick_dang_bao.png", th=self.inst.thresholds)
                                 if qc.found:
                                     self._tap(qc.x, qc.y, 1)
-                                    # self._sleep(300)
                                 
                                 # Dùng Cache để Tap nút Tạo rao bán
                                 if cached_tao_ban:
@@ -694,7 +692,6 @@ class FarmEngine:
         Truyền vào danh sách args (templates), tìm tọa độ của tất cả, sau đó mới tap.
         """
         coords_to_tap = []
-        
         # 1. Quét toàn bộ args trên cùng 1 bức ảnh truyền vào
         for tmpl in templates:
             match = find_one(screen, tmpl, th=self.inst.thresholds)
@@ -711,9 +708,13 @@ class FarmEngine:
     # ── Main loop ─────────────────────────────────────────────────────────────
 
     def _run_loop(self) -> None:
-        self.adb = make_adb(self.inst.adb_path, self.inst.emu_index)
-        if self.inst.adb_serial:
-            self.adb.serial = self.inst.adb_serial
+        serial_to_use = self.inst.adb_serial
+        
+        # Chuẩn hóa nếu người dùng chỉ điền số cổng (VD: 5555 -> 127.0.0.1:5555)
+        if serial_to_use and serial_to_use.isdigit():
+            serial_to_use = f"127.0.0.1:{serial_to_use}"
+
+        self.adb = AdbController(adb_path=self.inst.adb_path, serial=serial_to_use)
 
         ok, msg = self.adb.full_connect()
         if not ok:

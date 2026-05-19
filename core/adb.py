@@ -12,15 +12,13 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-# LDPlayer ADB TCP ports
-LD_PORTS = [5554, 5556, 5558, 5560, 5562, 5564]
-
 class AdbController:
     def __init__(self, adb_path: str = "adb", serial: str = ""):
         self.adb_path  = adb_path
         self.serial    = serial
         self._touch_dev: Optional[tuple[str, int, int]] = None
         self._screen_wh: Optional[tuple[int, int]]      = None
+        self._is_native_portrait: bool                  = False
 
     def _base(self) -> list:
         cmd = [self.adb_path]
@@ -79,39 +77,49 @@ class AdbController:
         self.start_server()
         time.sleep(0.4)
 
-        # Cố gắng kết nối bằng TCP nếu serial có dạng IP:Port
+        if self.serial and self.serial.isdigit():
+            port_num = int(self.serial)
+            if port_num >= 5554 and port_num % 2 == 0 and port_num <= 5584:
+                self.serial = f"emulator-{self.serial}"
+            else:
+                self.serial = f"127.0.0.1:{self.serial}"
+
         if self.serial and ":" in self.serial:
             self.connect()
             time.sleep(0.8)
 
         devs = self.devices()
 
-        # 1. Kiểm tra chính xác tên serial
         if self.serial in devs:
-            return True, f"Đã kết nối: {self.serial}"
+            return True, f"Đã kết nối thành công: {self.serial}"
 
-        # 2. Thuật toán Alias: LDPlayer có thể hiển thị là emulator-xxxx thay vì 127.0.0.1:xxxx
-        if self.serial.startswith("127.0.0.1:"):
+        if self.serial and self.serial.startswith("127.0.0.1:"):
             port = self.serial.split(":")[1]
-            alias = f"emulator-{port}"
-            if alias in devs:
-                self.serial = alias  # Đổi sang Alias để điều khiển
-                return True, f"Đã kết nối: {self.serial}"
-                
-        # 3. Kiem tra ngược lại
-        if self.serial.startswith("emulator-"):
-            port = self.serial.split("-")[1]
-            alias = f"127.0.0.1:{port}"
-            if alias in devs:
-                self.serial = alias
-                return True, f"Đã kết nối: {self.serial}"
+            if f"emulator-{port}" in devs:
+                self.serial = f"emulator-{port}"
+                return True, f"Đã kết nối thành công: {self.serial}"
 
-        raw = self.devices_raw()
-        return False, (
-            f"Lỗi ADB: Không tìm thấy giả lập '{self.serial}'\n\n"
-            f"Danh sách hiện có: {devs}\n\n"
-            f"Hãy mở LDPlayer và đảm bảo tính năng 'Gỡ lỗi USB' đang được bật!"
-        )
+        if self.serial and self.serial.startswith("emulator-"):
+            port = self.serial.split("-")[1]
+            if f"127.0.0.1:{port}" in devs:
+                self.serial = f"127.0.0.1:{port}"
+                return True, f"Đã kết nối thành công: {self.serial}"
+
+        if self.serial:
+            return False, (
+                f"LỖI: Không tìm thấy giả lập nào tại cổng '{self.serial}'.\n\n"
+                f"Danh sách hiện có: {devs}\n\n"
+                f"Hãy kiểm tra lại số cổng và đảm bảo giả lập đã được bật lên nhé!"
+            )
+
+        if not self.serial:
+            if devs:
+                self.serial = devs[0]
+                return True, f"Tự động nhận diện thiết bị đang mở: {self.serial}"
+            else:
+                return False, "Lỗi: Không tìm thấy bất kỳ giả lập nào đang chạy!"
+
+        return False, "Lỗi không xác định."
 
     def screenshot(self) -> Optional[np.ndarray]:
         import cv2
@@ -136,9 +144,15 @@ class AdbController:
                 try:
                     part = line.split(":")[-1].strip()
                     w, h = part.split("x")
-                    self._screen_wh = (int(w), int(h))
+                    side1, side2 = int(w), int(h)
+                    
+                    # [TỐI ƯU CỐT LÕI]: Phát hiện lõi phần cứng là dọc (Portrait)
+                    self._is_native_portrait = (side1 < side2)
+                    
+                    self._screen_wh = (max(side1, side2), min(side1, side2))
                     return self._screen_wh
                 except Exception: pass
+        self._is_native_portrait = False
         self._screen_wh = (1280, 720)
         return self._screen_wh
 
@@ -194,6 +208,10 @@ class AdbController:
         return "__OK__" in out
 
     def _do_sendevent_gesture(self, hold_pt: tuple[int, int], path_pts: list[tuple[int, int]], hold_ms: int = 800, step_ms: int = 80, delays: Optional[list[float]] = None) -> bool:
+        # [GIẢI QUYẾT LỖI MUMU]: Vô hiệu hóa sendevent nếu lõi phần cứng bị dựng dọc, ép dùng Fallback input swipe của phần mềm
+        if self._is_native_portrait:
+            return False
+
         try:
             dev, max_tx, max_ty = self._detect_touch_device()
             sw, sh = self._screen_size()
@@ -233,7 +251,8 @@ class AdbController:
         except Exception:
             return False
 
-    def hold_and_drag_path(self, hold_pt: tuple[int, int], path_pts: list[tuple[int, int]], hold_ms: int = 900, step_ms: int = 150, delays: Optional[list[float]] = None, max_len: int = 6000) -> None:
+    # [TỐI ƯU TỐC ĐỘ FALLBACK]: Ép step_ms = 50 để input swipe quẹt siêu nhanh trên MuMu
+    def hold_and_drag_path(self, hold_pt: tuple[int, int], path_pts: list[tuple[int, int]], hold_ms: int = 900, step_ms: int = 50, delays: Optional[list[float]] = None, max_len: int = 6000) -> None:
         if not path_pts: 
             return self.long_press(hold_pt[0], hold_pt[1], hold_ms)
             
@@ -260,8 +279,3 @@ class AdbController:
         for b in batches:
             est_timeout = int((hold_ms + len(b) * step_ms) / 1000) + 15
             self.run(["shell", " && ".join(b)], timeout=est_timeout)
-
-def make_adb(adb_path: str, emu_index: int) -> AdbController:
-    idx  = max(0, emu_index)
-    port = LD_PORTS[idx] if idx < len(LD_PORTS) else 5554 + idx * 2
-    return AdbController(adb_path=adb_path, serial=f"127.0.0.1:{port}")
