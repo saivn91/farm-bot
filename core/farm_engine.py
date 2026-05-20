@@ -122,23 +122,226 @@ class FarmEngine:
         if screen is None:
             screen = self._shot()
         if screen is None:
-            self._tap(10, 10)
             return False
 
         x_btn = find_one(screen, "dong_x.png", th=self.inst.thresholds)
         if not x_btn.found:
             x_btn = find_one(screen, "dong_x_2.png", th=self.inst.thresholds)
+            if not x_btn.found:
+                x_btn = find_one(screen, "dong_x_3.png", th=self.inst.thresholds)
 
         if x_btn.found:
-            self._log(f"Tìm thấy nút X để đóng (score={x_btn.score:.3f}).")
             self._debug_save(screen, "phat_hien_nut_x_de_dong", tool_pt=(x_btn.x, x_btn.y))
             self._tap(x_btn.x, x_btn.y)
             return True
-        else:
-            self._log("Không thấy nút X, dùng tap (10, 10) để đóng tạm.")
-            self._tap(10, 10)
-            return False
+        return False
+        
+    # ── Reset Cam ──────────────────────────────────────────────
 
+    def _close_all_popups(self):
+        """Kiểm tra và đóng toàn bộ popup xuất hiện trên màn hình cho đến khi sạch bóng"""
+        closed_any = True
+        close_count = 0
+        while closed_any and close_count < 5 and not self._stop.is_set():
+            closed_any = self._close_x()
+            if closed_any:
+                close_count += 1
+                self._sleep(200)
+
+    def _zoom_out(self):
+        """
+        SỬ DỤNG WINDOWS API QUA CTYPES (SẴN CÓ TRONG PYTHON)
+        Gửi phím F5 trực tiếp vào cửa sổ LDPlayer trên Windows (chạy ngầm).
+        """
+        self._log("Zoom Out")
+        try:
+            import ctypes
+            import time
+            
+            user32 = ctypes.windll.user32
+            emu_index = self.inst.emu_index # Lấy số thứ tự giả lập (0, 1, 2...)
+            display_name = self.inst.get_display_name() # Tự động lấy Tên bạn đặt trên giao diện Tool!
+            
+            # ĐÃ SỬA: Đưa định nghĩa kiểu hàm Callback Windows lên đầu để tránh lỗi UnboundLocalError
+            WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_int, ctypes.c_int)
+            
+            # Khởi tạo danh sách các tiêu đề cửa sổ có khả năng trùng khớp nhất
+            titles = [display_name]
+            if self.inst.name.strip():
+                titles.append(self.inst.name.strip())
+                
+            if emu_index == 0:
+                titles += ["LDPlayer", "LDPlayer(64)", "LDPlayer-0"]
+            else:
+                titles += [f"LDPlayer-{emu_index}", f"LDPlayer({emu_index})", f"LDPlayer-{emu_index}(64)"]
+            
+            # Lọc bỏ các tên trùng lặp hoặc rỗng
+            titles = list(set([t for t in titles if t]))
+            
+            hwnd = 0
+            for title in titles:
+                hwnd = user32.FindWindowW(None, title)
+                if hwnd: 
+                    break
+                
+            # Nếu vẫn không tìm thấy thẳng bằng tên, duyệt tìm tất cả các cửa sổ Windows chứa chữ "LDPlayer"
+            if not hwnd:
+                inner_hwnd = [0]
+                def enum_windows_proc(h, lParam):
+                    buf = ctypes.create_unicode_buffer(256)
+                    user32.GetWindowTextW(h, buf, 256)
+                    text = buf.value
+                    
+                    # Kiểm tra nếu tiêu đề chứa tên hiển thị hoặc chứa chữ LDPlayer
+                    if display_name in text or "LDPlayer" in text:
+                        if emu_index == 0 and ("-" not in text and "(" not in text or "(64)" in text):
+                            inner_hwnd[0] = h
+                            return False
+                        elif f"-{emu_index}" in text or f"({emu_index})" in text:
+                            inner_hwnd[0] = h
+                            return False
+                    return True
+                
+                # Gọi hàm quét cửa sổ cha bằng định nghĩa Callback an toàn
+                user32.EnumWindows(WNDENUMPROC(enum_windows_proc), 0)
+                hwnd = inner_hwnd[0]
+                
+            if hwnd:
+                WM_KEYDOWN = 0x0100
+                WM_KEYUP = 0x0101
+                VK_F5 = 0x74  # Mã phím F5 chuẩn trên Windows
+                
+                def send_f5_to_target(target_hwnd):
+                    # Gửi liên tục 6 lần phím F5 để ép game thu nhỏ về mức tối đa
+                    for _ in range(6):
+                        user32.PostMessageW(target_hwnd, WM_KEYDOWN, VK_F5, 0)
+                        time.sleep(0.03)
+                        user32.PostMessageW(target_hwnd, WM_KEYUP, VK_F5, 0)
+                        time.sleep(0.03)
+                
+                # Gửi lệnh phím vào cửa sổ chính
+                send_f5_to_target(hwnd)
+                
+                # Gửi lệnh phím vào tất cả các cửa sổ con bên trong (Lớp hiển thị đồ họa của LDPlayer)
+                def enum_child_proc(h, lParam):
+                    send_f5_to_target(h)
+                    return True
+                user32.EnumChildWindows(hwnd, WNDENUMPROC(enum_child_proc), 0)
+                
+                self._sleep(500)
+            else:
+                self._log(f"[CẢNH BÁO] Không tìm thấy cửa sổ Windows ứng với tên '{display_name}' hoặc Chỉ mục {emu_index}!")
+        except Exception as e:
+            self._log(f"Lỗi khi thực hiện gửi phím F5 Windows API: {e}")
+            
+        # Quét sạch popup phòng trường hợp hy hữu máy lag
+        self._close_all_popups()
+
+    def _align_to_center_vertical_third(self, current_x: int, current_y: int):
+        """Căn chỉnh đưa Cửa hàng về vị trí: Chính giữa chiều ngang, 1/3 chiều dọc màn hình"""
+        sw, sh = self.adb._screen_size()
+        target_x = sw // 3       # Chính giữa màn hình chiều ngang
+        target_y = sh // 2       # 1/3 màn hình chiều dọc
+        
+        dx = current_x - target_x
+        dy = current_y - target_y
+        
+        cx, cy = sw // 2, sh // 2
+        # Vuốt ngược hướng lệch để kéo Cửa hàng về đúng tọa độ mục tiêu cố định
+        self.adb.run(["shell", "input", "swipe", str(cx), str(cy), str(cx - dx), str(cy - dy), "600"])
+        self._sleep(1000)
+        self._log(f"Đã neo Cửa hàng về vị trí chuẩn (Ngang giữa: {target_x}, Dọc 1/3: {target_y}).")
+
+    def _reset_camera(self, is_restarting=False) -> bool:
+        self._log("Bắt đầu quy trình RESET CAMERA...")
+        
+        # 1. Đóng sạch bóng toàn bộ popup có trên màn hình
+        self._close_all_popups()
+        
+        # 2. Thực hiện Zoom Out hết cỡ bằng phím F5 Windows
+        self._zoom_out()
+        
+        # 3. Quét tìm cửa hàng để làm điểm neo cố định
+        for attempt in range(2):
+            if self._stop.is_set(): return False
+            
+            screen = self._shot()
+            self._debug_save(screen, "reset_camera_cua_hang")
+            if screen is None:
+                self._sleep(1000)
+                continue
+                
+            cua_hang = find_one(screen, "cua_hang.png", th=self.inst.thresholds)
+            
+            if cua_hang.found:
+                self._log("Đã tìm thấy Cửa hàng, tiến hành căn chỉnh vị trí camera...")
+                self._align_to_center_vertical_third(cua_hang.x, cua_hang.y)
+                return True
+                
+            # Nếu lượt đầu không thấy, tiến hành kéo tối đa camera lên góc Trên - Trái để tìm kiếm
+            if attempt == 0:
+                self._log("Không thấy cửa hàng. Tiến hành kéo MAX camera về góc Trên - Trái...")
+                sw, sh = self.adb._screen_size()
+                
+                # Kéo kịch sàn về góc bằng cách vuốt liên tục từ Trên-Trái xuống Dưới-Phải
+                for _ in range(10):
+                    self.adb.run(["shell", "input", "swipe", str(sw//5), str(sh//5), str(sw*4//5), str(sh*4//5), "400"])
+                    self._sleep(200)
+                
+                # Sau đó kéo ngược camera xuống dưới 1 nửa màn hình (vuốt từ dưới lên trên)
+                self.adb.run(["shell", "input", "swipe", str(sw//2), str(sh*3//4), str(sw//2), str(sh//4), "600"])
+                self._sleep(1000)
+                
+                self._close_all_popups()
+        
+        # 4. Nếu đã kéo tìm và zoom đủ kiểu vẫn không thấy cửa hàng -> Kích hoạt cứu trợ văng game
+        if not is_restarting:
+            self._log("Vẫn không tìm thấy cửa hàng sau khi kéo tìm! Kích hoạt quy trình khôi phục văng game.")
+            return self._check_and_restart_game()
+            
+        self._log("Reset camera thất bại!")
+        return False
+
+    def _check_and_restart_game(self) -> bool:
+        self._log("Đang kiểm tra biểu tượng game ngoài màn hình chính giả lập...")
+        
+        # Bấm phím Home 2 lần để chắc chắn thoát ra ngoài màn hình chính LDPlayer
+        self.adb.run(["shell", "input", "keyevent", "3"])
+        self._sleep(800)
+        self.adb.run(["shell", "input", "keyevent", "3"])
+        self._sleep(1000)
+        
+        screen = self._shot()
+        if screen is None: return False
+            
+        icon = find_one(screen, "icon_game.png", th=self.inst.thresholds)
+        if not icon.found:
+            self._log("LỖI HỆ THỐNG: Không tìm thấy ảnh 'icon_game.png' ngoài màn hình Home! Dừng bot.")
+            self.inst.status = BotStatus.ERROR
+            self.stop()
+            return False
+            
+        self._log("Đã tìm thấy biểu tượng game! Đang kích hoạt mở lại game...")
+        self.inst.status = "KHỞI ĐỘNG LẠI GAME"
+        self._tap(icon.x, icon.y)
+        
+        self._log("Đang chờ trong 30 giây để game khởi động và tải dữ liệu...")
+        for _ in range(30):
+            if self._stop.is_set(): return False
+            self._sleep(1000)
+            
+        self._log("Game đã mở xong! Tiến hành gọi lại hàm Reset Camera để thiết lập góc chuẩn...")
+        if self._reset_camera(is_restarting=True):
+            self._log("Khôi phục thành công! Ngay lập tức kích hoạt chu trình Gieo Hạt mới...")
+            self.inst.farm_region = None
+            self._plant_cycle()
+            return True
+            
+        self._log("Khôi phục camera thất bại sau khi khởi động lại game.")
+        self.inst.status = BotStatus.ERROR
+        self.stop()
+        return False
+        
     # ── Doc so luong Pytesseract ──────────────────────────────────────────────
 
     def _read_quantity(self, screen: np.ndarray, match_res) -> int:
@@ -267,19 +470,12 @@ class FarmEngine:
         if self._stop.is_set():
             return False
             
-        self._tap(15, 100) 
-        self._sleep(1000)
+        self._tap(10,10) 
+        self._sleep(100)
         
         screen_check = self._shot()
         if screen_check is not None:
-            x_btn = find_one(screen_check, "dong_x.png", th=self.inst.thresholds)
-            if not x_btn.found:
-                x_btn = find_one(screen_check, "dong_x_2.png", th=self.inst.thresholds)
-                
-            if x_btn.found:
-                self._log("Phát hiện popup lạ, đang đóng...")
-                self._tap(x_btn.x, x_btn.y)
-                self._sleep(800) 
+            self._close_x(screen_check) 
         
         screen = self._shot()
         if screen is None:
@@ -287,8 +483,15 @@ class FarmEngine:
             
         cells = find_soil_cells(screen, th=self.inst.thresholds)
         if not cells:
-            self._log("Không thấy đất sau khi căn giữa!")
-            return False
+            self._log("Không thấy đất sau khi căn giữa! Kích hoạt cứu hộ Camera...")
+            # GỌI HÀM CỨU HỘ VỪA THÊM
+            if self._reset_camera(): 
+                screen = self._shot()
+                if screen is not None:
+                    cells = find_soil_cells(screen, th=self.inst.thresholds)
+                    
+            if not cells:
+                return False
             
         self.inst.farm_region = None 
         self._update_region(cells, screen)
@@ -536,8 +739,19 @@ class FarmEngine:
         
         if not cua_hang.found:
             self._debug_save(screen, "shop_khong_thay_cua_hang")
-            self._log("Không tìm thấy cửa hàng, hủy quá trình bán hàng và quay lại chờ.")
-            return
+            self._log("Không tìm thấy cửa hàng! Kích hoạt cứu hộ Camera...")
+            
+            # Gọi quy trình cứu hộ
+            if self._reset_camera():
+                # Chụp lại màn hình để tìm lại cửa hàng
+                screen = self._shot()
+                if screen is not None:
+                    cua_hang = find_one(screen, "cua_hang.png", th=self.inst.thresholds)
+                    
+            # Nếu cứu hộ xong vẫn không thấy
+            if not cua_hang.found:
+                self._log("Vẫn không tìm thấy cửa hàng sau khi cứu hộ, hủy quá trình bán hàng và quay lại chờ.")
+                return
 
         self._log("Đã thấy cửa hàng, đang tap mở...")
         self._tap(cua_hang.x, cua_hang.y)
@@ -545,7 +759,7 @@ class FarmEngine:
         if self._stop.is_set():
             return
 
-        max_swipes = 15 
+        max_swipes = 10 
         swipes = 0
         
         luot_ban_toi_da = -1 
@@ -751,8 +965,18 @@ class FarmEngine:
                     self.inst.status = BotStatus.SCANNING
                     self._debug_save(screen, "scanning_chua_thay_dat")
                     self._log("Chưa thấy đất trống. Thử lại sau 5s...")
+
+                    # Đếm số lần fail, nếu quá 3 lần (15 giây) -> Kích hoạt cứu hộ
+                    self.scan_fail_count = getattr(self, 'scan_fail_count', 0) + 1
+                    if self.scan_fail_count >= 3:
+                        self._log("Không tìm thấy nông trại quá lâu, kích hoạt quy trình Cứu hộ (Reset Camera)...")
+                        self._reset_camera()
+                        self.scan_fail_count = 0
+
                     self._sleep(5000)
                     continue
+                else:
+                    self.scan_fail_count = 0 # Reset bộ đếm nếu tìm thấy đất
 
                 r    = self.inst.farm_region
                 bbox = r.bbox  

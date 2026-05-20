@@ -74,18 +74,18 @@ class TemplateThresholds:
     dong_x:        float = 0.60
     dong_x_2:      float = 0.60
     
-    cua_hang:      float = 0.75
+    cua_hang:      float = 0.70
     thung_trong:   float = 0.75
     thung_da_ban:  float = 0.75
     tao_rao_ban:   float = 0.60
-    nut_cong:      float = 0.80
     # --- Cac nguong cho viec ban hang ---
-    kho_nong_san_shop: float = 0.75
-    lua_kho:           float = 0.75
+    kho_nong_san_shop: float = 0.70
+    lua_kho:           float = 0.70
     mui_ten_phai:      float = 0.70
     quang_cao_ngay:    float = 0.65
     nut_tick_dang_bao: float = 0.65
     het_hom_do:        float = 0.75
+    icon_game:         float = 0.70
 
     def get(self, tmpl_name: str) -> float:
         key = tmpl_name.replace(".png", "").replace(".jpg", "")
