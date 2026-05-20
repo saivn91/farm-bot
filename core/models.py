@@ -73,6 +73,7 @@ class TemplateThresholds:
     # --- Su dung 2 nut dong_x va ha nguong xuong 0.6 ---
     dong_x:        float = 0.60
     dong_x_2:      float = 0.60
+    dong_x_3:      float = 0.60
     
     cua_hang:      float = 0.70
     thung_trong:   float = 0.75
