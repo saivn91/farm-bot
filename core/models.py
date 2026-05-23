@@ -75,7 +75,7 @@ class TemplateThresholds:
     dong_x_2:      float = 0.60
     dong_x_3:      float = 0.60
     
-    cua_hang:      float = 0.70
+    cua_hang:      float = 0.75
     thung_trong:   float = 0.75
     thung_da_ban:  float = 0.75
     tao_rao_ban:   float = 0.60
