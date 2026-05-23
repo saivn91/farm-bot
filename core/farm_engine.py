@@ -471,14 +471,21 @@ class FarmEngine:
             poly  = compute_polygon(cells)
             bbox  = compute_bbox(cells)
 
+            # Tính tọa độ trọng tâm nguyên bản
             cx = sum(c.x for c in cells) / len(cells)
             cy = sum(c.y for c in cells) / len(cells)
+            
+            # Giữ nguyên logic lấy ô đất gần tâm nhất làm mốc chuẩn
             anchor_cell = min(cells, key=lambda c: (c.x - cx) ** 2 + (c.y - cy) ** 2)
+
+            # --- SỬA LỖI: Dịch điểm Tap xuống 5px để luôn ấn vào nửa dưới của ô đất ---
+            safe_anchor_x = anchor_cell.x + 5
+            safe_anchor_y = anchor_cell.y + 5
 
             self.inst.farm_region = FarmRegion(
                 polygon    = poly,
                 sweep_path = sweep,
-                anchor     = (anchor_cell.x, anchor_cell.y),
+                anchor     = (safe_anchor_x, safe_anchor_y),
                 cell_count = len(cells),
                 bbox       = bbox,
                 last_scan  = time.time(),
@@ -490,13 +497,22 @@ class FarmEngine:
                     sx, sy = cua_hang.x, cua_hang.y
                     self.shop_offset = {
                         'bbox': (bbox[0] - sx, bbox[1] - sy, bbox[2] - sx, bbox[3] - sy),
-                        'anchor': (anchor_cell.x - sx, anchor_cell.y - sy),
+                        'anchor': (safe_anchor_x - sx, safe_anchor_y - sy),
                         'sweep': [(p[0] - sx, p[1] - sy) for p in sweep],
                         'poly': [(p[0] - sx, p[1] - sy) for p in poly]
                     }
                     self._log("Đã neo tọa độ Khu vực Nông trại an toàn với Cửa hàng.")
                 else:
                     self.shop_offset = None
+
+                self._debug_save(
+                    screen, "scan_vung_dat",
+                    text=f"Tong so dat: {len(cells)}",
+                    polygon=poly,
+                    cells=cells,
+                    anchor=(safe_anchor_x, safe_anchor_y),
+                    path=sweep if sweep else None,
+                )
 
     def _build_tool_path(
         self,
@@ -914,8 +930,8 @@ class FarmEngine:
             self.inst.adb_serial = self.adb.serial
             self._log(f"Kết nối ADB thành công: {msg}")
 
-            self._close_all_popups()
-            self._zoom_out()
+            # self._close_all_popups()
+            # self._zoom_out()
 
             if self.inst.enable_shop:
                 success = self._init_shop_and_cache()
