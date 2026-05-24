@@ -882,7 +882,7 @@ class FarmEngine:
                 if tien_vang.found:
                     self._log("Trang đầu tiên đang đầy hàng. Thử kiểm tra đăng báo quảng cáo...")
                     self._tap(tien_vang.x, tien_vang.y)
-                    self._sleep(500)
+                    self._sleep(300)
                     
                     sc_adv = self._shot()
                     if sc_adv is not None:
