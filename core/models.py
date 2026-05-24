@@ -79,12 +79,15 @@ class TemplateThresholds:
     thung_trong:   float = 0.75
     thung_da_ban:  float = 0.75
     tao_rao_ban:   float = 0.60
+    tao_tin_quang_cao:   float = 0.60
+    tien_vang:   float = 0.70
     # --- Cac nguong cho viec ban hang ---
     kho_nong_san_shop: float = 0.70
     lua_kho:           float = 0.70
     mui_ten_phai:      float = 0.70
     quang_cao_ngay:    float = 0.65
     nut_tick_dang_bao: float = 0.65
+    nut_tick_dang_bao_2: float = 0.65
     het_hom_do:        float = 0.75
     icon_game:         float = 0.70
 

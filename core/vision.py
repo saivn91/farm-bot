@@ -292,25 +292,28 @@ def build_farm_sweep(
     min_iy = min(p[1] for p in iso_pts)
     max_iy = max(p[1] for p in iso_pts)
 
-    # 4. Gom nhóm tính toán số lượng hàng thực tế
+    # 4. Sử dụng thuật toán phân cụm (Clustering) để lấy chính xác tọa độ tâm từng hàng
     sorted_ix = sorted([p[0] for p in iso_pts])
-    row_centers = [sorted_ix[0]]
+    clusters = []
+    current_cluster = [sorted_ix[0]]
+
     for ix in sorted_ix[1:]:
-        if ix - row_centers[-1] > 30:
-            row_centers.append(ix)
+        if ix - current_cluster[-1] > 20: # Ngưỡng tách hàng (khoảng cách giữa 2 hàng thường ~30-40)
+            clusters.append(current_cluster)
+            current_cluster = [ix]
+        else:
+            current_cluster.append(ix)
+    clusters.append(current_cluster)
 
-    num_rows = max(3, len(row_centers))
+    # Tính tọa độ X Isometric tâm chuẩn xác cho từng hàng thay vì chia trung bình
+    exact_row_centers = [sum(c) / len(c) for c in clusters]
+
     path: list[tuple[int, int]] = []
+    start_iy = min_iy
+    end_iy = max_iy
 
-    # --- ĐÃ CHỈNH SỬA: Đưa padding về 0 để không bị thu hẹp lộ trình ---
-    pad_y = 0
-    start_iy = min_iy + pad_y
-    end_iy = max_iy - pad_y
-
-    for i in range(num_rows):
-        # Tọa độ X (iso_x) của hàng hiện tại
-        t = i / max(num_rows - 1, 1)
-        ix = min_ix + t * (max_ix - min_ix)
+    # Thay thế vòng lặp range() bằng việc duyệt trực tiếp qua tọa độ tâm thực tế
+    for i, ix in enumerate(exact_row_centers):
 
         # Hàm nội suy tọa độ màn hình từ Isometric
         def to_scr(ix_val, iy_val):

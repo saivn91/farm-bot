@@ -224,14 +224,16 @@ class FarmEngine:
                         user32.PostMessageW(target_hwnd, WM_KEYUP, VK_F5, 0)
                         time.sleep(0.03)
                 
-                send_f5_to_target(hwnd)
+                for _ in range(5):
+                    send_f5_to_target(hwnd)
+                    self._sleep(100)
                 
                 def enum_child_proc(h, lParam):
                     send_f5_to_target(h)
                     return True
                 user32.EnumChildWindows(hwnd, WNDENUMPROC(enum_child_proc), 0)
                 
-                self._sleep(500)
+                self._sleep(200)
             else:
                 self._log(f"[CẢNH BÁO] Không tìm thấy cửa sổ LDPlayer ứng với tên '{display_name}'.")
         except StopException:
@@ -241,20 +243,27 @@ class FarmEngine:
             
         self._close_all_popups()
 
-    def _reset_camera_and_find_shop(self) -> bool:
+    def _reset_camera_and_find_shop(self, allow_restart: bool = True) -> bool:
         self._log("Gọi hàm Khôi phục vị trí Camera...")
         self._close_all_popups()
         self._zoom_out()
+        
+        screen = self._shot()
+        if screen is None: return False
+        cua_hang = find_one(screen, "cua_hang.png", th=self.inst.thresholds)
+        if cua_hang.found:
+            self._log("Đã tìm thấy Cửa hàng sau khi reset vị trí Camera.")
+            return True
         
         sw, sh = self.adb._screen_size()
         self._log("Đang đẩy camera kịch góc Trên-Trái...")
         for _ in range(10):
             self.adb.run(["shell", "input", "swipe", str(int(sw*0.2)), str(int(sh*0.2)), str(int(sw*0.8)), str(int(sh*0.8)), "300"])
-            self._sleep(200)
+            self._sleep(100)
             
         self._log("Đang dịch camera xuống giữa để định vị Cửa hàng...")
         self.adb.run(["shell", "input", "swipe", str(sw//2), str(int(sh*0.8)), str(sw//2), str(int(sh*0.3)), "600"])
-        self._sleep(1500)
+        self._sleep(1000)
         
         screen = self._shot()
         if screen is None: return False
@@ -263,6 +272,12 @@ class FarmEngine:
         if cua_hang.found:
             self._log("Đã tìm thấy Cửa hàng sau khi reset vị trí Camera.")
             return True
+        
+        # Nếu không thấy cửa hàng và được phép restart thì gọi _check_and_restart_game
+        if allow_restart:
+            self._log("Reset Camera thất bại: Không thấy Cửa hàng (Có thể do dis game). Đang tiến hành khôi phục lại ứng dụng...")
+            return self._check_and_restart_game()
+        
         return False
 
     def _align_shop_to_bottom_left(self):
@@ -274,8 +289,8 @@ class FarmEngine:
             
             if cua_hang.found:
                 sw, sh = self.adb._screen_size()
-                target_x = int(sw * 0.2) 
-                target_y = int(sh * 0.8) 
+                target_x = int(sw * 0.3) 
+                target_y = int(sh * 0.7) 
                 
                 dx = cua_hang.x - target_x
                 dy = cua_hang.y - target_y
@@ -299,6 +314,16 @@ class FarmEngine:
         if not self.inst.enable_shop:
             return True
             
+        # Bỏ qua lấy mẫu UI nếu đã có sẵn trong bộ nhớ ---
+        if self.cached_mui_ten and self.cached_tao_ban:
+            self._log("Đã có tọa độ UI shop trong bộ nhớ. Tiến hành neo lại Camera...")
+            # Chỉ cần đẩy góc nhìn về chuẩn và kéo Cửa hàng về góc trái dưới
+            found = self._reset_camera_and_find_shop(allow_restart=False)
+            if found:
+                self._align_shop_to_bottom_left()
+                return True
+            return False
+        
         self._log("Bắt đầu quy trình khởi tạo Cửa hàng và lấy tọa độ UI...")
         
         for attempt in range(3):
@@ -308,7 +333,7 @@ class FarmEngine:
             cua_hang = find_one(screen, "cua_hang.png", th=self.inst.thresholds)
             if not cua_hang.found:
                 self._log(f"Lần {attempt+1}/3: Không tìm thấy Cửa hàng. Gọi hàm Reset Camera...")
-                found = self._reset_camera_and_find_shop()
+                found = self._reset_camera_and_find_shop(allow_restart=False)
                 if not found:
                     continue
                 screen = self._shot()
@@ -318,7 +343,7 @@ class FarmEngine:
 
             self._log("Đã thấy Cửa hàng, tiến hành mở để lấy mẫu UI...")
             self._tap(cua_hang.x, cua_hang.y)
-            self._sleep(2500)
+            self._sleep(1000)
             
             sc2 = self._shot()
             
@@ -328,18 +353,18 @@ class FarmEngine:
                 if thung_da_ban.found:
                     self._log("Không có thùng trống. Tap thu tiền thùng đã bán để lấy không gian...")
                     self._tap(thung_da_ban.x, thung_da_ban.y)
-                    self._sleep(1500)
+                    self._sleep(500)
                     sc2 = self._shot() 
                     thung_trong = find_one(sc2, "thung_trong.png", th=self.inst.thresholds)
             
             if not thung_trong.found:
                 self._close_x(sc2)
                 self._log(f"Lần {attempt+1}/3: Vẫn không có thùng trống để lấy mẫu UI.")
-                self._sleep(2000)
+                self._sleep(1000)
                 continue
                 
             self._tap(thung_trong.x, thung_trong.y)
-            self._sleep(1500)
+            self._sleep(500)
                 
             sc_menu = self._shot()
             self._debug_save(sc_menu, "quet_mau_ui_shop")
@@ -354,7 +379,7 @@ class FarmEngine:
                 self._close_x(sc_menu)
                 self._sleep(500)
                 self._close_x()
-                self._sleep(1000)
+                self._sleep(500)
                 
                 self._align_shop_to_bottom_left()
                 return True
@@ -362,33 +387,51 @@ class FarmEngine:
                 self._close_x(sc_menu)
                 self._close_x()
                 self._log(f"Lần {attempt+1}/3: Không tìm thấy đủ 2 nút Mũi tên và Tạo bán.")
-                self._sleep(2000)
+                self._sleep(1000)
                 
         self._log("CẢNH BÁO: Thất bại sau 3 lần khởi tạo Cửa hàng! Yêu cầu dừng hệ thống.")
         return False
 
     def _check_and_restart_game(self) -> bool:
-        self._log("Kiểm tra biểu tượng ứng dụng ngoài màn hình chính...")
+        self._log("Kiểm tra thông báo mất kết nối / đăng nhập nơi khác...")
         
-        self.adb.run(["shell", "input", "keyevent", "3"])
-        self._sleep(800)
-        self.adb.run(["shell", "input", "keyevent", "3"])
-        self._sleep(1000)
-        
+        # 1. Chụp màn hình hiện tại trước khi thoát ra Home
         screen = self._shot()
-        if screen is None: return False
-            
-        icon = find_one(screen, "icon_game.png", th=self.inst.thresholds)
-        if not icon.found:
-            self._log("LỖI HỆ THỐNG: Không tìm thấy biểu tượng game. Vui lòng kiểm tra lại cấu hình!")
-            self.inst.status = BotStatus.ERROR
-            self._stop.set()
-            raise StopException()
-            
-        self._log("Phát hiện biểu tượng, tiến hành khôi phục ứng dụng...")
-        self.inst.status = "KHỞI ĐỘNG LẠI GAME"
-        self._tap(icon.x, icon.y)
+        reloaded = False
         
+        if screen is not None:
+            # Tìm nút Tải lại trò chơi
+            tai_lai = find_one(screen, "tai_lai_tro_choi.png", th=self.inst.thresholds)
+            
+            if tai_lai.found:
+                self._log("Phát hiện nút 'Tải lại trò chơi'. Đang tiến hành kết nối lại...")
+                self.inst.status = "KHỞI ĐỘNG LẠI GAME"
+                self._tap(tai_lai.x, tai_lai.y)
+                reloaded = True
+        
+        # 2. Nếu không có nút tải lại, mới tiến hành thoát ra màn hình chính tìm icon game
+        if not reloaded:
+            self._log("Không thấy nút Tải lại, thử tìm biểu tượng game ngoài màn hình chính...")
+            self.adb.run(["shell", "input", "keyevent", "3"])
+            self._sleep(800)
+            self.adb.run(["shell", "input", "keyevent", "3"])
+            self._sleep(1000)
+            
+            screen = self._shot()
+            if screen is None: return False
+                
+            icon = find_one(screen, "icon_game.png", th=self.inst.thresholds)
+            if not icon.found:
+                self._log("LỖI HỆ THỐNG: Không tìm thấy biểu tượng game. Vui lòng kiểm tra lại cấu hình!")
+                self.inst.status = BotStatus.ERROR
+                self._stop.set()
+                raise StopException()
+                
+            self._log("Phát hiện biểu tượng, tiến hành khôi phục ứng dụng...")
+            self.inst.status = "KHỞI ĐỘNG LẠI GAME"
+            self._tap(icon.x, icon.y)
+            
+        # 3. Chờ 30 giây để game nạp dữ liệu (Dùng chung cho cả 2 trường hợp)
         self._log("Chờ 30 giây để nạp dữ liệu...")
         for _ in range(30):
             self._sleep(1000)
@@ -414,7 +457,7 @@ class FarmEngine:
             pytesseract.pytesseract.tesseract_cmd = self.inst.tesseract_path
             x, y = match_res.x, match_res.y
             
-            x_start = max(0, x - 25)
+            x_start = max(0, x - 60)
             x_end = min(x + 85, screen.shape[1])
             y_start = max(0, y - 10)
             y_end = min(screen.shape[0], y + 75)
@@ -544,10 +587,10 @@ class FarmEngine:
 
         self._log("Thực hiện định tâm camera...")
         self._tap(r.anchor[0], r.anchor[1])
-        self._sleep(1500)
+        self._sleep(500)
 
         self._tap(10, 10)
-        self._sleep(500)
+        self._sleep(100)
 
         screen_check = self._shot()
         if screen_check is not None:
@@ -618,7 +661,7 @@ class FarmEngine:
             
             kernel = np.ones((5, 5), np.uint8)
             mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-            mask = cv2.dilate(mask, kernel, iterations=4)
+            mask = cv2.dilate(mask, kernel, iterations=9)
             
             contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             
@@ -673,7 +716,7 @@ class FarmEngine:
             return
 
         self._tap(harvest_anchor[0], harvest_anchor[1])
-        self._sleep(1500)
+        self._sleep(500)
 
         sc_menu = self._shot()
         if sc_menu is None: return
@@ -694,11 +737,15 @@ class FarmEngine:
             self._close_x(sc_menu)
             return
 
+        # Tính toán đường vuốt (full_path) trước
+        full_path, delays = self._build_tool_path((liem.x, liem.y), harvest_anchor, harvest_sweep)
+
         self._debug_save(
             sc_menu, "harvest_thay_liem",
             text="Gat_lua",
             tool_pt=(liem.x, liem.y),
             anchor=harvest_anchor,
+            path=full_path
         )
 
         full_path, delays = self._build_tool_path((liem.x, liem.y), harvest_anchor, harvest_sweep)
@@ -745,7 +792,7 @@ class FarmEngine:
         if not r: return
 
         self._tap(r.anchor[0], r.anchor[1])
-        self._sleep(1500)
+        self._sleep(500)
 
         screen_after = self._shot()
         if screen_after is None: return
@@ -769,11 +816,15 @@ class FarmEngine:
             self._close_x(screen_after)
             return
 
+        # Tính đường kéo hạt giống trước
+        full_path, delays = self._build_tool_path((seed.x, seed.y), current_anchor, current_sweep_path)
+
         self._debug_save(
             screen_after, "plant_thay_hat",
             text="Tien_hanh_gieo_hat",
             tool_pt=(seed.x, seed.y),
             anchor=current_anchor,
+            path=full_path
         )
 
         full_path, delays = self._build_tool_path((seed.x, seed.y), current_anchor, current_sweep_path)
@@ -809,7 +860,7 @@ class FarmEngine:
             return
 
         self._tap(cua_hang.x, cua_hang.y)
-        self._sleep(2000)
+        self._sleep(1000)
 
         max_swipes = 10 
         swipes = 0
@@ -825,6 +876,39 @@ class FarmEngine:
             thung_trong_list = find_all(sc2, "thung_trong.png", th=self.inst.thresholds)
             danh_sach_thung_co_the_ban = []
 
+            # Nếu là màn hình đầu tiên (swipes == 0) mà KHÔNG CÓ thùng trống/đã bán
+            if swipes == 0 and not thung_da_ban_list and not thung_trong_list:
+                tien_vang = find_one(sc2, "tien_vang.png", th=self.inst.thresholds)
+                if tien_vang.found:
+                    self._log("Trang đầu tiên đang đầy hàng. Thử kiểm tra đăng báo quảng cáo...")
+                    self._tap(tien_vang.x, tien_vang.y)
+                    self._sleep(500)
+                    
+                    sc_adv = self._shot()
+                    if sc_adv is not None:
+                        # Tìm nút "Tạo tin quảng cáo" hoặc "Quảng cáo ngay"
+                        quang_cao_ngay = find_one(sc_adv, "quang_cao_ngay.png", th=self.inst.thresholds)
+
+                        if quang_cao_ngay.found:
+                            # 1. Tick vào nút quảng cáo trước
+                            tick_qc = find_one(sc_adv, "nut_tick_dang_bao_2.png", th=self.inst.thresholds)
+                            if tick_qc.found:
+                                self._tap(tick_qc.x, tick_qc.y, 1)
+                                self._sleep(100)
+
+                                # 2. Tap vào nút đăng báo
+                                tao_tin = find_one(sc_adv, "tao_tin_quang_cao.png", th=self.inst.thresholds)
+                                if tao_tin.found:
+                                    self._tap(tao_tin.x, tao_tin.y)
+                                    self._log("Đã đăng báo thành công cho thùng hàng hiện tại.")
+                            else:
+                                self._log("Không tìm thấy nút tick quảng cáo.")
+                                self._close_x(sc_adv)
+                                                            
+                        else:
+                            self._log("Thùng hàng này chưa thể đăng báo (chưa hồi thời gian).")
+                            self._close_x(sc_adv)
+
             if thung_da_ban_list:
                 self._log(f"Phát hiện {len(thung_da_ban_list)} đơn hàng đã bán. Đang thu thập...")
                 for sold in thung_da_ban_list:
@@ -839,7 +923,7 @@ class FarmEngine:
                     if not self.can_sell_crops: break
 
                     self._tap(tx, ty)
-                    self._sleep(200)
+                    self._sleep(500)
                     
                     sc_menu = self._shot()
                     if sc_menu is not None:
@@ -988,8 +1072,8 @@ class FarmEngine:
                     
                     r = self.inst.farm_region
 
-                    if cells:
-                        self._update_region(cells, screen)
+                    # if cells:
+                    #     self._update_region(cells, screen)
 
                     hsv_img = cv2.cvtColor(screen, cv2.COLOR_BGR2HSV)
                     lower_yellow = np.array([18, 120, 150])
