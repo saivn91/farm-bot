@@ -35,11 +35,6 @@ test-vision/screen.png
 # Config (luu tren may nguoi dung, khong commit)
 # Config duoc luu tai %APPDATA%/FarmBot/config.json
 
-# Templates (anh chup tu game, khong commit)
-templates/*.png
-templates/*.jpg
-!templates/README.md
-
 # Logs
 *.log
 
