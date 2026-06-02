@@ -292,7 +292,7 @@ def build_farm_sweep(
     min_iy = min(p[1] for p in iso_pts)
     max_iy = max(p[1] for p in iso_pts)
 
-    # 4. Sử dụng thuật toán phân cụm (Clustering) để lấy chính xác tọa độ tâm từng hàng
+    # 4. Gom nhóm tính toán số lượng hàng thực tế
     sorted_ix = sorted([p[0] for p in iso_pts])
     clusters = []
     current_cluster = [sorted_ix[0]]
@@ -305,8 +305,27 @@ def build_farm_sweep(
             current_cluster.append(ix)
     clusters.append(current_cluster)
 
-    # Tính tọa độ X Isometric tâm chuẩn xác cho từng hàng thay vì chia trung bình
-    exact_row_centers = [sum(c) / len(c) for c in clusters]
+    # Tính tọa độ tâm của các hàng CÓ THỂ NHẬN DIỆN ĐƯỢC
+    detected_centers = [sum(c) / len(c) for c in clusters]
+
+    # --- Bù đắp các hàng bị ẩn/thiếu do lúa che khuất ---
+    exact_row_centers = [detected_centers[0]]
+    for i in range(1, len(detected_centers)):
+        prev = exact_row_centers[-1]
+        curr = detected_centers[i]
+        diff = curr - prev
+        
+        # Khoảng cách chuẩn giữa 2 hàng trong không gian Isometric của HayDay là ~30px
+        # Tính xem khoảng cách hiện tại gấp mấy lần khoảng cách chuẩn
+        num_steps = max(1, round(diff / 30.0))
+        
+        if num_steps > 1:
+            # Bị khuyết hàng ở giữa, tiến hành chia đều để chèn lại (các) hàng bị thiếu
+            step_size = diff / num_steps
+            for j in range(1, num_steps):
+                exact_row_centers.append(prev + j * step_size)
+                
+        exact_row_centers.append(curr)
 
     path: list[tuple[int, int]] = []
     start_iy = min_iy

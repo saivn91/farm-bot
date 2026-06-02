@@ -923,7 +923,7 @@ class FarmEngine:
                     if not self.can_sell_crops: break
 
                     self._tap(tx, ty)
-                    self._sleep(500)
+                    self._sleep(200)
                     
                     sc_menu = self._shot()
                     if sc_menu is not None:
