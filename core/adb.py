@@ -208,36 +208,43 @@ class AdbController:
         return "__OK__" in out
 
     def _do_sendevent_gesture(self, hold_pt: tuple[int, int], path_pts: list[tuple[int, int]], hold_ms: int = 800, step_ms: int = 80, delays: Optional[list[float]] = None) -> bool:
-        # [GIẢI QUYẾT LỖI MUMU]: Vô hiệu hóa sendevent nếu lõi phần cứng bị dựng dọc, ép dùng Fallback input swipe của phần mềm
-        if self._is_native_portrait:
-            return False
-
         try:
             dev, max_tx, max_ty = self._detect_touch_device()
             sw, sh = self._screen_size()
             if not self._sendevent_test(dev): return False
 
-            sx = max_tx / max(sw - 1, 1)
-            sy = max_ty / max(sh - 1, 1)
-            def cvt_x(x: int) -> int: return max(0, min(max_tx, round(x * sx)))
-            def cvt_y(y: int) -> int: return max(0, min(max_ty, round(y * sy)))
+            # [SỬA LỖI MUMU/NOX]: Đã loại bỏ lệnh chặn sendevent.
+            # Thay vào đó, áp dụng thuật toán xoay trục tọa độ 90 độ ngược chiều kim đồng hồ
+            # cho các giả lập lõi dọc (Native Portrait) nhưng hiển thị ngang (Landscape).
+            if self._is_native_portrait:
+                def cvt_x(x: int, y: int) -> int: 
+                    return max(0, min(max_tx, round((1.0 - y / sh) * max_tx)))
+                def cvt_y(x: int, y: int) -> int: 
+                    return max(0, min(max_ty, round((x / sw) * max_ty)))
+            else:
+                sx = max_tx / max(sw - 1, 1)
+                sy = max_ty / max(sh - 1, 1)
+                def cvt_x(x: int, y: int) -> int: return max(0, min(max_tx, round(x * sx)))
+                def cvt_y(x: int, y: int) -> int: return max(0, min(max_ty, round(y * sy)))
 
             hx, hy = hold_pt
             hold_s = f"{hold_ms / 1000:.3f}"
             default_s = step_ms / 1000.0
             se = f"sendevent {dev}"
 
+            # [SỬA LỖI MUMU 12 - ANDROID 11+]: 
+            # Sửa mã ABS_MT_TRACKING_ID (57) từ 0 thành 123 để Android ghi nhận Touch Down hợp lệ.
             lines = [
                 "echo __GESTURE_START__",
-                f"{se} 3 47 0", f"{se} 3 57 0", f"{se} 3 48 5", f"{se} 3 58 50",
-                f"{se} 3 53 {cvt_x(hx)}", f"{se} 3 54 {cvt_y(hy)}",
+                f"{se} 3 47 0", f"{se} 3 57 123", f"{se} 3 48 5", f"{se} 3 58 50",
+                f"{se} 3 53 {cvt_x(hx, hy)}", f"{se} 3 54 {cvt_y(hx, hy)}",
                 f"{se} 1 330 1", f"{se} 0 0 0", f"sleep {hold_s}",
             ]
 
             total_delay = hold_ms / 1000.0
             for i, (x, y) in enumerate(path_pts):
                 d = delays[i] if delays else default_s
-                lines += [f"{se} 3 53 {cvt_x(x)}", f"{se} 3 54 {cvt_y(y)}", f"{se} 0 0 0"]
+                lines += [f"{se} 3 53 {cvt_x(x, y)}", f"{se} 3 54 {cvt_y(x, y)}", f"{se} 0 0 0"]
                 if d > 0: lines.append(f"sleep {d:.3f}"); total_delay += d
 
             lines += [f"{se} 3 57 -1", f"{se} 1 330 0", f"{se} 0 0 0", "echo __GESTURE_DONE__"]

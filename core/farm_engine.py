@@ -181,9 +181,10 @@ class FarmEngine:
                 titles.append(self.inst.name.strip())
                 
             if emu_index == 0:
-                titles += ["LDPlayer", "LDPlayer(64)", "LDPlayer-0"]
+                titles += ["LDPlayer", "LDPlayer(64)", "LDPlayer-0", "MuMu Player", "MuMuPlayer", "MuMu Player 12"]
             else:
                 titles += [f"LDPlayer-{emu_index}", f"LDPlayer({emu_index})", f"LDPlayer-{emu_index}(64)"]
+                titles += [f"MuMu Player-{emu_index}", f"MuMuPlayer-{emu_index}", f"MuMu Player 12-{emu_index}"]
             
             titles = list(set([t for t in titles if t]))
             
@@ -199,7 +200,15 @@ class FarmEngine:
                     user32.GetWindowTextW(h, buf, 256)
                     text = buf.value
                     
-                    if display_name in text or "LDPlayer" in text:
+                    custom_name = self.inst.name.strip()
+                    
+                    # 1. Nhận diện tuyệt đối theo tên người dùng tự đặt
+                    if custom_name and custom_name in text:
+                        inner_hwnd[0] = h
+                        return False
+                        
+                    # 2. Tự động tìm kiếm nếu người dùng không đặt tên
+                    if "MuMu" in text or "LDPlayer" in text:
                         if emu_index == 0 and ("-" not in text and "(" not in text or "(64)" in text):
                             inner_hwnd[0] = h
                             return False
@@ -216,26 +225,68 @@ class FarmEngine:
                 WM_KEYUP = 0x0101
                 VK_F5 = 0x74  
                 
-                def send_f5_to_target(target_hwnd):
-                    for _ in range(6):
-                        self._check_stop()
-                        user32.PostMessageW(target_hwnd, WM_KEYDOWN, VK_F5, 0)
-                        time.sleep(0.03)
-                        user32.PostMessageW(target_hwnd, WM_KEYUP, VK_F5, 0)
-                        time.sleep(0.03)
+                # --- NÂNG CẤP THUẬT TOÁN NHẬN DIỆN GIẢ LẬP ĐA LỚP ---
+                title_buf = ctypes.create_unicode_buffer(256)
+                user32.GetWindowTextW(hwnd, title_buf, 256)
                 
-                for _ in range(5):
-                    send_f5_to_target(hwnd)
-                    self._sleep(100)
+                class_buf = ctypes.create_unicode_buffer(256)
+                user32.GetClassNameW(hwnd, class_buf, 256)
                 
-                def enum_child_proc(h, lParam):
-                    send_f5_to_target(h)
-                    return True
-                user32.EnumChildWindows(hwnd, WNDENUMPROC(enum_child_proc), 0)
+                title_str = title_buf.value.lower()
+                class_str = class_buf.value.lower()
+                custom_str = self.inst.name.strip().lower()
+                serial_str = self.inst.adb_serial.lower()
                 
-                self._sleep(200)
+                is_mumu = (
+                    "mumu" in title_str or 
+                    "mumu" in custom_str or 
+                    "nemu" in class_str or 
+                    "qt5" in class_str or 
+                    "7555" in serial_str or 
+                    "1638" in serial_str
+                )
+                # ---------------------------------------------------
+                
+                if is_mumu:
+                    self._log("Phát hiện giả lập MuMu, thực hiện Zoom Out 1 lần bằng phím cơ học.")
+                    try:
+                        user32.ShowWindow(hwnd, 9) # SW_RESTORE
+                        user32.SetForegroundWindow(hwnd)
+                        time.sleep(0.3)
+                    except Exception:
+                        pass
+                    
+                    # Bắn phím F5 phần cứng 1 lần duy nhất cho MuMu
+                    user32.keybd_event(VK_F5, 0x3F, 0, 0)
+                    time.sleep(0.05)
+                    user32.keybd_event(VK_F5, 0x3F, 2, 0)
+                    time.sleep(0.15)
+                    
+                else:
+                    self._log("Phát hiện giả lập LDPlayer, thực hiện Zoom Out nhồi lệnh nhiều lần.")
+                    def send_f5_to_target(target_hwnd):
+                        for _ in range(6):
+                            self._check_stop()
+                            user32.PostMessageW(target_hwnd, WM_KEYDOWN, VK_F5, 0)
+                            time.sleep(0.03)
+                            user32.PostMessageW(target_hwnd, WM_KEYUP, VK_F5, 0)
+                            time.sleep(0.03)
+                    
+                    for _ in range(5):
+                        send_f5_to_target(hwnd)
+                        self._sleep(100)
+                    
+                    def enum_child_proc(h, lParam):
+                        for _ in range(5):
+                            send_f5_to_target(h)
+                            self._check_stop()
+                            time.sleep(0.1)
+                        return True
+                    user32.EnumChildWindows(hwnd, WNDENUMPROC(enum_child_proc), 0)
+                
+                self._sleep(500)
             else:
-                self._log(f"[CẢNH BÁO] Không tìm thấy cửa sổ LDPlayer ứng với tên '{display_name}'.")
+                self._log(f"[CẢNH BÁO] Không tìm thấy cửa sổ giả lập ứng với tên '{display_name}'.")
         except StopException:
             raise
         except Exception as e:
