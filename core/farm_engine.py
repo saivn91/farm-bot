@@ -474,6 +474,8 @@ class FarmEngine:
             icon = find_one(screen, "icon_game.png", th=self.inst.thresholds)
             if not icon.found:
                 icon = find_one(screen, "icon_game_1.png", th=self.inst.thresholds)
+                if not icon.found:
+                    icon = find_one(screen, "icon_game_2.png", th=self.inst.thresholds)
 
             if not icon.found:
                 self._log("LỖI HỆ THỐNG: Không tìm thấy biểu tượng game. Vui lòng kiểm tra lại cấu hình!")
