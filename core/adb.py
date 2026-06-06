@@ -207,7 +207,7 @@ class AdbController:
         code, out, err = self.run(["shell", f"sendevent {dev} 0 0 0 && echo __OK__"], timeout=5)
         return "__OK__" in out
 
-    def _do_sendevent_gesture(self, hold_pt: tuple[int, int], path_pts: list[tuple[int, int]], hold_ms: int = 800, step_ms: int = 80, delays: Optional[list[float]] = None) -> bool:
+    def _do_sendevent_gesture(self, hold_pt: tuple[int, int], path_pts: list[tuple[int, int]], hold_ms: int = 800, step_ms: int = 60, delays: Optional[list[float]] = None) -> bool:
         try:
             dev, max_tx, max_ty = self._detect_touch_device()
             sw, sh = self._screen_size()
@@ -245,7 +245,7 @@ class AdbController:
             for i, (x, y) in enumerate(path_pts):
                 d = delays[i] if delays else default_s
                 lines += [f"{se} 3 53 {cvt_x(x, y)}", f"{se} 3 54 {cvt_y(x, y)}", f"{se} 0 0 0"]
-                if d > 0: lines.append(f"sleep {d:.3f}"); total_delay += d
+                if d > 0.5: lines.append(f"sleep {d:.3f}"); total_delay += d
 
             lines += [f"{se} 3 57 -1", f"{se} 1 330 0", f"{se} 0 0 0", "echo __GESTURE_DONE__"]
             script = "\n".join(lines) + "\n"
