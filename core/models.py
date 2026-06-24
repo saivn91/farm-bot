@@ -89,7 +89,9 @@ class TemplateThresholds:
     nut_tick_dang_bao: float = 0.65
     nut_tick_dang_bao_2: float = 0.65
     het_hom_do:        float = 0.75
-    icon_game:         float = 0.70
+    icon_game:         float = 0.60
+    icon_game_1:         float = 0.60
+    icon_game_2:         float = 0.60
 
     def get(self, tmpl_name: str) -> float:
         key = tmpl_name.replace(".png", "").replace(".jpg", "")
