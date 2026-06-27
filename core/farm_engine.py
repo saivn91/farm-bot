@@ -470,7 +470,8 @@ class FarmEngine:
             
             screen = self._shot()
             if screen is None: return False
-                
+
+            self._debug_save(screen, "man_hinh_chinh")    
             icon = find_one(screen, "icon_game.png", th=self.inst.thresholds)
             if not icon.found:
                 icon = find_one(screen, "icon_game_1.png", th=self.inst.thresholds)
