@@ -945,10 +945,16 @@ class FarmEngine:
                     if sc_adv is not None:
                         # Tìm nút "Tạo tin quảng cáo" hoặc "Quảng cáo ngay"
                         quang_cao_ngay = find_one(sc_adv, "quang_cao_ngay.png", th=self.inst.thresholds)
+                        self._debug_save(sc_adv, "trang_thai_thung_hang")
 
                         if quang_cao_ngay.found:
                             # 1. Tick vào nút quảng cáo trước
                             tick_qc = find_one(sc_adv, "nut_tick_dang_bao_2.png", th=self.inst.thresholds)
+                            if not tick_qc.found:
+                                tick_qc = find_one(sc_adv, "nut_tick_dang_bao_3.png", th=self.inst.thresholds)
+
+                            self._debug_save(sc_adv, "tim_thay_nut_tick_quang_cao", tool_pt=(tick_qc.x, tick_qc.y))
+
                             if tick_qc.found:
                                 self._tap(tick_qc.x, tick_qc.y, 1)
                                 self._sleep(100)
